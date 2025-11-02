@@ -1,0 +1,92 @@
+name: 🔒 Repo Security Bot
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  schedule:
+    - cron: "0 12 * * *" # runs daily at noon
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create reports folder
+        run: mkdir -p reports
+
+      # --- 1. Secrets Scanning (Gitleaks) ---
+      - name: 🕵️ Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --source . --report-path reports/gitleaks.json --exit-code 0
+
+      # --- 2. Dependency Scanning (Snyk) ---
+      - name: 🔍 Run Snyk Dependency Scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: a165e64b-65fa-4ec4-873b-1a1e9c7a9238
+        with:
+          args: test --json-file-output=reports/snyk.json || true
+
+      # --- 3. IaC Scanning (Checkov) ---
+      - name: 🧱 Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          output_format: json
+          output_file_path: reports/checkov.json
+
+      # --- 4. Docker Hardening (Dockle) ---
+      - name: 🐳 Run Dockle
+        run: |
+          docker pull goodwithtech/dockle
+          docker run --rm -v $(pwd):/app goodwithtech/dockle dockle /app/Dockerfile > reports/dockle.txt
+
+      # --- 5. Python Security (Bandit) ---
+      - name: 🐍 Run Bandit
+        run: |
+          pip install bandit
+          bandit -r . -f json -o reports/bandit.json || true
+
+      # --- 6. Combine Reports into Markdown Summary ---
+      - name: 🧩 Generate Markdown Summary
+        run: |
+          echo "# 🔒 Security Scan Summary" > reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "## 🕵️ Gitleaks (Secrets Scan)" >> reports/security-summary.md
+          echo '```json' >> reports/security-summary.md
+          cat reports/gitleaks.json >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "## 🔍 Snyk (Dependency Scan)" >> reports/security-summary.md
+          echo '```json' >> reports/security-summary.md
+          cat reports/snyk.json >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
+          echo '```json' >> reports/security-summary.md
+          cat reports/checkov.json >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
+          echo '```text' >> reports/security-summary.md
+          cat reports/dockle.txt >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
+          echo '```json' >> reports/security-summary.md
+          cat reports/bandit.json >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+          echo "---" >> reports/security-summary.md
+          echo "_Generated automatically by Repo Security Bot_" >> reports/security-summary.md
+
+      # --- 7. Upload ONLY the summary ---
+      - name: 📦 Upload Summary Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary
+          path: reports/security-summary.md
