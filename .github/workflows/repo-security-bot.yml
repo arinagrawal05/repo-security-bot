@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "0 12 * * *"
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      SNYK_TOKEN:
+        required: false
+
 
 jobs:
   security-scan:
