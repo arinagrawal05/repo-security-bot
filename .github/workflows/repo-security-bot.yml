@@ -24,11 +24,10 @@ jobs:
         continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         with:
-          report_path: reports/gitleaks.json
-          report_format: json
-          # FIX: Tell the action 'fail: false' so it ALWAYS writes the
-          # JSON report, even when secrets are found.
-          fail: false
+          # FIX: Pass all commands via 'args' to ensure the correct
+          # report format and path are used. This overrides the
+          # action's default behavior of creating a .sarif file.
+          args: "detect --source . --report-path reports/gitleaks.json --report-format json --exit-code 0"
 
       # --- 2. 🔍 Dependency Scanning (Snyk) ---
       - name: Setup Snyk
@@ -166,7 +165,7 @@ jobs:
               echo "_Checkov scan failed or no files found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              cat reports/checkov_results.json >> reports/security-summary.md
+              cat reports/checkov_results.json >> reports/checkov_results.json
               echo '```' >> reports/security-summary.md
             fi
           else
@@ -180,7 +179,7 @@ jobs:
               echo "_No Dockerfile found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              cat reports/dockle.json >> reports/security-summary.md
+              cat reports/dockle.json >> reports/dockle.json
               echo '```' >> reports/security-summary.md
             fi
           else
@@ -194,7 +193,7 @@ jobs:
               echo "_No Python files found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              cat reports/bandit.json >> reports/security-summary.md
+              cat reports/bandit.json >> reports/bandit.json
               echo '```' >> reports/security-summary.md
             fi
           else
