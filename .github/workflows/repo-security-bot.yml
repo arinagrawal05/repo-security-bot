@@ -22,9 +22,16 @@ jobs:
         continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         with:
-          args: detect --source . --report-path reports/gitleaks.json --exit-code 0
+          # Use the action's dedicated inputs for clarity and robustness
+          report_path: reports/gitleaks.json
+          report_format: json
+          # Pass other arguments to the binary
+          args: "detect --source . --exit-code 0"
 
       # --- 2. 🔍 Dependency Scanning (Snyk) ---
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+        
       - name: Run Snyk Dependency Scan (multi-language)
         continue-on-error: true
         env:
@@ -36,13 +43,13 @@ jobs:
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
             echo "Python project detected."
-            snyk test --file=requirements.txt --json-file-output=reports/snyk.json || true
+            snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "pom.xml" ]; then
             echo "Java Maven project detected."
             snyk test --file=pom.xml --json-file-output=reports/snyk.json || true
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
             echo "Java Gradle project detected."
-            snyk test --file=build.gradle --json-file-output=reports/snyk.json || true
+            snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "go.mod" ]; then
             echo "Go project detected."
             snyk test --file=go.mod --json-file-output=reports/snyk.json || true
@@ -62,6 +69,7 @@ jobs:
             echo "No known dependency file detected. Skipping Snyk scan."
             echo '{"message": "No dependency files found, skipped Snyk scan."}' > reports/snyk.json
           fi
+          
       # --- 3. 🧱 IaC Scanning (Checkov) ---
       - name: Run Checkov
         continue-on-error: true
@@ -78,11 +86,10 @@ jobs:
           if [ -f "Dockerfile" ]; then
             echo "Dockerfile found. Building and scanning..."
             
-            # 1. BUILD THE IMAGE: This is the step you were missing
-            # We give it a temporary name like "my-scan-image"
+            # 1. BUILD THE IMAGE
             docker build -t my-scan-image:latest .
             
-            # 2. SCAN THE IMAGE: Now we point dockle at the IMAGE NAME
+            # 2. SCAN THE IMAGE (This now correctly outputs dockle.json)
             docker pull goodwithtech/dockle
             docker run --rm goodwithtech/dockle:latest \
               -f json \
@@ -90,54 +97,87 @@ jobs:
               my-scan-image:latest || true
               
           else
-            echo "No Dockerfile found. Skipping Dockle scan." > reports/dockle.txt
+            echo "No Dockerfile found. Skipping Dockle scan."
+            echo '{"message": "No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
           fi
 
       # --- 5. 🐍 Python Security (Bandit) ---
       - name: Run Bandit
         continue-on-error: true
         run: |
-          if [ -d "__pycache__" ] || ls *.py >/dev/null 2>&1; then
+          if ls *.py >/dev/null 2>&1; then
             pip install bandit
             bandit -r . -f json -o reports/bandit.json || true
           else
             echo '{"message": "No Python files found, skipped Bandit scan."}' > reports/bandit.json
           fi
 
-      # --- 6. 🧩 Generate Markdown Summary ---
+      # --- 6. 🧩 Generate Markdown Summary (FIXED) ---
       - name: Generate Markdown Summary
         run: |
           echo "# 🔒 Security Scan Summary" > reports/security-summary.md
           echo "" >> reports/security-summary.md
 
           echo "## 🕵️ Gitleaks (Secrets Scan)" >> reports/security-summary.md
-          echo '```json' >> reports/security-summary.md
-          cat reports/gitleaks.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
+          # Use -s to check if file exists AND is not empty
+          if [ -s "reports/gitleaks.json" ]; then
+            echo '```json' >> reports/security-summary.md
+            cat reports/gitleaks.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
+          else
+            echo "_No secrets found or scan failed._" >> reports/security-summary.md
+          fi
           echo "" >> reports/security-summary.md
 
           echo "## 🔍 Snyk (Dependency Scan)" >> reports/security-summary.md
-          echo '```json' >> reports/security-summary.md
-          cat reports/snyk.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
+          if [ -s "reports/snyk.json" ]; then
+            echo '```json' >> reports/security-summary.md
+            cat reports/snyk.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
+          else
+            echo "_No dependencies found or scan failed._" >> reports/security-summary.md
+          fi
           echo "" >> reports/security-summary.md
 
           echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
-          echo '```json' >> reports/security-summary.md
-          cat reports/checkov.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
+          if [ -s "reports/checkov.json" ]; then
+            echo '```json' >> reports/security-summary.md
+            cat reports/checkov.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
+          else
+            echo "_No IaC files found or scan failed._" >> reports/security-summary.md
+          fi
           echo "" >> reports/security-summary.md
 
           echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
-          echo '```text' >> reports/security-summary.md
-          cat reports/dockle.txt >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
+          # This now correctly checks for dockle.json
+          if [ -s "reports/dockle.json" ]; then
+            # We also check if it's the "skip" message
+            if grep -q "No Dockerfile found" reports/dockle.json; then
+              echo "_No Dockerfile found._" >> reports/security-summary.md
+            else
+              echo '```json' >> reports/security-summary.md
+              cat reports/dockle.json >> reports/security-summary.md
+              echo '```' >> reports/security-summary.md
+            fi
+          else
+            echo "_Dockle scan failed._" >> reports/security-summary.md
+          fi
           echo "" >> reports/security-summary.md
 
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
-          echo '```json' >> reports/security-summary.md
-          cat reports/bandit.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
+          if [ -s "reports/bandit.json" ]; then
+            # We also check if it's the "skip" message
+            if grep -q "No Python files found" reports/bandit.json; then
+              echo "_No Python files found._" >> reports/security-summary.md
+            else
+              echo '```json' >> reports/security-summary.md
+              cat reports/bandit.json >> reports/security-summary.md
+              echo '```' >> reports/security-summary.md
+            fi
+          else
+            echo "_Bandit scan failed._" >> reports/security-summary.md
+          fi
           echo "" >> reports/security-summary.md
 
           echo "---" >> reports/security-summary.md
