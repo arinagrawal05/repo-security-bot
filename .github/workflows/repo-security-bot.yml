@@ -10,23 +10,25 @@ on:
 
 jobs:
 
+  # ---------------------------------------------------
+  # 1. Run each scanner as a reusable workflow
+  # ---------------------------------------------------
   gitleaks:
-    uses: arinagrawal05/repo-security-bot/.github/gitleaks.yml@main
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-gitleaks.yml@main
 
   snyk:
-    uses: arinagrawal05/repo-security-bot/.github/snyk.yml@main
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-snyk.yml@main
     secrets:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   checkov:
-    uses: arinagrawal05/repo-security-bot/.github/checkov.yml@main
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-checkov.yml@main
 
   dockle:
-    uses: arinagrawal05/repo-security-bot/.github/dockle.yml@main
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-dockle.yml@main
 
   bandit:
-    uses: arinagrawal05/repo-security-bot/.github/bandit.yml@main
-
+    uses: arinagrawal05/repo-security-bot/t/.github/workflows/scan-bandit.yml@main
 
   # ---------------------------------------------------
   # 2. Summary job — runs AFTER all scans finish
