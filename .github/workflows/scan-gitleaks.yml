@@ -1,0 +1,33 @@
+name: "Gitleaks Scan"
+
+on:
+  workflow_call:
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Gitleaks
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          docker pull ghcr.io/gitleaks/gitleaks:latest || true
+          docker run --rm -v "${{ github.workspace }}":/repo \
+            ghcr.io/gitleaks/gitleaks:latest detect \
+            --source /repo \
+            --report-path /repo/reports/gitleaks.json \
+            --report-format json \
+            --exit-code 0 || true
+
+          if [ ! -s reports/gitleaks.json ]; then
+            echo '[]' > reports/gitleaks.json
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: reports/gitleaks.json

@@ -1,0 +1,30 @@
+name: "Scan: Checkov"
+
+on:
+  workflow_call:
+
+jobs:
+  checkov:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Checkov
+        run: pip install --upgrade pip checkov
+
+      - name: Run Checkov
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          checkov -d . --quiet -o json > reports/checkov_results.json || true
+
+          if [ ! -s reports/checkov_results.json ]; then
+            echo "[]" > reports/checkov_results.json
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-report
+          path: reports/checkov_results.json

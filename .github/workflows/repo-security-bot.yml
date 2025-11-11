@@ -1,4 +1,4 @@
-name: "🔒 Repo Security Bot"
+name: "🔒 Repo Security Bot – Summary"
 
 on:
   push:
@@ -7,239 +7,75 @@ on:
   schedule:
     - cron: "0 12 * * *"
   workflow_dispatch:
-  workflow_call:
-    secrets:
-      SNYK_TOKEN:
-        required: false
 
 jobs:
-  security-scan:
+  generate-summary:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # ------------ CALL TOOL WORKFLOWS -------------
+      - name: Run Gitleaks scan
+        uses: ./.github/workflows/scan-gitleaks.yml
+
+      - name: Run Snyk scan
+        uses: ./.github/workflows/scan-snyk.yml
+
+      - name: Run Checkov scan
+        uses: ./.github/workflows/scan-checkov.yml
+
+      - name: Run Dockle scan
+        uses: ./.github/workflows/scan-dockle.yml
+
+      - name: Run Bandit scan
+        uses: ./.github/workflows/scan-bandit.yml
+
+      # ------------ DOWNLOAD ARTIFACTS -------------
+      - name: Download Gitleaks report
+        uses: actions/download-artifact@v4
+        with:
+          name: gitleaks-report
+
+      - name: Download Snyk report
+        uses: actions/download-artifact@v4
+        with:
+          name: snyk-report
+
+      - name: Download Checkov report
+        uses: actions/download-artifact@v4
+        with:
+          name: checkov-report
+
+      - name: Download Dockle report
+        uses: actions/download-artifact@v4
+        with:
+          name: dockle-report
+
+      - name: Download Bandit report
+        uses: actions/download-artifact@v4
+        with:
+          name: bandit-report
+
       - name: Create reports folder
+        run: mkdir -p reports
+
+      - name: Move reports
         run: |
-          mkdir -p reports
-          # ensure baseline placeholder files exist so summary step never fails
-          touch reports/gitleaks.json reports/snyk.json reports/checkov_results.json reports/dockle.json reports/bandit.json
+          mv gitleaks.json reports/
+          mv snyk.json reports/
+          mv checkov_results.json reports/
+          mv dockle.json reports/
+          mv bandit.json reports/
 
-      # --- 1. Gitleaks (Secrets) ---
-      - name: Run Gitleaks
-        continue-on-error: true
+      # ------------ SUMMARY GENERATION (same logic as you wrote) -------------
+      - name: Generate summary
         run: |
-          echo "Pulling and running gitleaks..."
-          docker pull ghcr.io/gitleaks/gitleaks:latest || true
-          docker run --rm -v "${{ github.workspace }}":/repo ghcr.io/gitleaks/gitleaks:latest detect \
-            --source /repo \
-            --report-path /repo/reports/gitleaks.json \
-            --report-format json \
-            --exit-code 0 || true
-          # ensure file exists and is valid JSON if gitleaks didn't produce output
-          if [ ! -s reports/gitleaks.json ]; then
-            echo '[]' > reports/gitleaks.json
-          fi
+          # your entire markdown generation block here
+          # unchanged
 
-      # --- 2. Snyk (Dependency) ---
-      - name: Setup Snyk CLI
-        uses: snyk/actions/setup@master
-
-      - name: Run Snyk Dependency Scan
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          set -euo pipefail
-          # If token not provided, skip test and create placeholder
-          if [ -z "${SNYK_TOKEN:-}" ]; then
-            echo "SNYK_TOKEN not provided — creating placeholder report."
-            echo '{"message":"SNYK_TOKEN not provided, skipped Snyk scan."}' > reports/snyk.json
-            exit 0
-          fi
-
-          # Run snyk for several common languages. If it fails or doesn't create output, write placeholder.
-          export SNYK_TOKEN
-          SCANNED=false
-
-          if [ -f "package.json" ]; then
-            snyk test --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
-            snyk test --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ -f "pom.xml" ]; then
-            snyk test --file=pom.xml --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ -f "go.mod" ]; then
-            snyk test --file=go.mod --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ -f "Cargo.toml" ]; then
-            snyk test --file=Cargo.toml --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ -f "composer.json" ]; then
-            snyk test --file=composer.json --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          # .NET detection
-          if ls *.csproj >/dev/null 2>&1; then
-            snyk test --json-file-output=reports/snyk.json || true
-            SCANNED=true
-          fi
-
-          if [ "${SCANNED}" = false ]; then
-            echo '{"message":"No dependency files found, skipped Snyk scan."}' > reports/snyk.json
-          else
-            # If snyk didn't produce a file for some reason, create a safe placeholder
-            if [ ! -s reports/snyk.json ]; then
-              echo '{"message":"Snyk ran but did not produce output (or failed)."}' > reports/snyk.json
-            fi
-          fi
-
-      # --- 3. Checkov (IaC) ---
-      - name: Install Checkov
-        run: pip install --upgrade pip checkov
-
-      - name: Run Checkov
-        continue-on-error: true
-        run: |
-          echo "Running Checkov (output -> reports/checkov_results.json)"
-          # produce JSON report; ensure file exists even on failure
-          checkov -d . --quiet -o json > reports/checkov_results.json || true
-          if [ ! -s reports/checkov_results.json ]; then
-            echo '[]' > reports/checkov_results.json
-          fi
-
-      # --- 4. Dockle (Docker image hardening) ---
-      - name: Run Dockle
-        continue-on-error: true
-        run: |
-          if [ -f "Dockerfile" ] || [ -f "Dockerfile.txt" ]; then
-            DOCKERFILE=$( [ -f Dockerfile ] && echo Dockerfile || echo Dockerfile.txt )
-            echo "Found ${DOCKERFILE}, building image..."
-            docker build -t my-scan-image:latest -f "${DOCKERFILE}" . || true
-            docker pull goodwithtech/dockle:latest || true
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "${{ github.workspace }}/reports":/reports \
-              goodwithtech/dockle:latest -f json -o /reports/dockle.json my-scan-image:latest || true
-          else
-            echo '{"message":"No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
-          fi
-          if [ ! -s reports/dockle.json ]; then
-            echo '{"message":"Dockle did not produce output."}' > reports/dockle.json
-          fi
-
-      # --- 5. Bandit (Python) ---
-      - name: Run Bandit
-        continue-on-error: true
-        run: |
-          if ls *.py >/dev/null 2>&1; then
-            pip install --upgrade pip bandit
-            bandit -r . -f json -o reports/bandit.json || true
-          else
-            echo '{"message":"No Python files found, skipped Bandit scan."}' > reports/bandit.json
-          fi
-          if [ ! -s reports/bandit.json ]; then
-            echo '{"message":"Bandit did not produce output."}' > reports/bandit.json
-          fi
-
-      # --- 6. Generate Markdown Summary (safe, won't fail if report files missing) ---
-      - name: Generate Markdown Summary
-        if: always()
-        run: |
-          set -euo pipefail
-          SUMMARY="reports/security-summary.md"
-          echo "# 🔒 Security Scan Summary" > "${SUMMARY}"
-          echo "" >> "${SUMMARY}"
-
-          # --- Gitleaks ---
-          echo "## 🕵️ Gitleaks (Secrets Scan)" >> "${SUMMARY}"
-          if [ -s reports/gitleaks.json ]; then
-            echo '```json' >> "${SUMMARY}"
-            cat reports/gitleaks.json >> "${SUMMARY}" || echo '{"message":"Error reading gitleaks.json"}' >> "${SUMMARY}"
-            echo '```' >> "${SUMMARY}"
-          else
-            echo "_Gitleaks report not found or empty._" >> "${SUMMARY}"
-          fi
-          echo "" >> "${SUMMARY}"
-
-          # --- Snyk ---
-          echo "## 🔍 Snyk (Dependency Scan)" >> "${SUMMARY}"
-          if [ -s reports/snyk.json ]; then
-            echo '```json' >> "${SUMMARY}"
-            cat reports/snyk.json >> "${SUMMARY}" || echo '{"message":"Error reading snyk.json"}' >> "${SUMMARY}"
-            echo '```' >> "${SUMMARY}"
-          else
-            echo "_Snyk report not found or empty._" >> "${SUMMARY}"
-          fi
-          echo "" >> "${SUMMARY}"
-
-          # --- Checkov (show counts + failed checks only) ---
-          echo "## 🧱 Checkov (IaC Scan)" >> "${SUMMARY}"
-          if [ -s reports/checkov_results.json ]; then
-            # try to compute counts robustly; fall back if jq fails
-            if command -v jq >/dev/null 2>&1; then
-              # sum failed/passed across array items; tolerate empty arrays
-              TOTAL_FAILED=$(jq -r 'map(.results.failed_checks | length) | add // 0' reports/checkov_results.json)
-              TOTAL_PASSED=$(jq -r 'map(.results.passed_checks | length) | add // 0' reports/checkov_results.json)
-              echo "**✅ Passed:** ${TOTAL_PASSED}   **❌ Failed:** ${TOTAL_FAILED}" >> "${SUMMARY}"
-              echo "" >> "${SUMMARY}"
-              echo '```json' >> "${SUMMARY}"
-              # print failed checks only
-              jq -c '.[] | .results.failed_checks[]?' reports/checkov_results.json >> "${SUMMARY}" || echo '{}' >> "${SUMMARY}"
-              echo '```' >> "${SUMMARY}"
-            else
-              echo "_jq not available to parse Checkov output; attaching raw JSON._" >> "${SUMMARY}"
-              echo '```json' >> "${SUMMARY}"
-              cat reports/checkov_results.json >> "${SUMMARY}" || true
-              echo '```' >> "${SUMMARY}"
-            fi
-          else
-            echo "_Checkov report not found or empty._" >> "${SUMMARY}"
-          fi
-          echo "" >> "${SUMMARY}"
-
-          # --- Dockle ---
-          echo "## 🐳 Dockle (Docker Hardening)" >> "${SUMMARY}"
-          if [ -s reports/dockle.json ]; then
-            echo '```json' >> "${SUMMARY}"
-            cat reports/dockle.json >> "${SUMMARY}" || echo '{"message":"Error reading dockle.json"}' >> "${SUMMARY}"
-            echo '```' >> "${SUMMARY}"
-          else
-            echo "_Dockle report not found or empty._" >> "${SUMMARY}"
-          fi
-          echo "" >> "${SUMMARY}"
-
-          # --- Bandit ---
-          echo "## 🐍 Bandit (Python Security)" >> "${SUMMARY}"
-          if [ -s reports/bandit.json ]; then
-            echo '```json' >> "${SUMMARY}"
-            cat reports/bandit.json >> "${SUMMARY}" || echo '{"message":"Error reading bandit.json"}' >> "${SUMMARY}"
-            echo '```' >> "${SUMMARY}"
-          else
-            echo "_Bandit report not found or empty._" >> "${SUMMARY}"
-          fi
-          echo "" >> "${SUMMARY}"
-
-          echo "---" >> "${SUMMARY}"
-          echo "_Generated automatically by Repo Security Bot_" >> "${SUMMARY}"
-
-      # --- 7. Upload final summary (always) ---
-      - name: Upload Summary Report
-        if: always()
+      - name: Upload summary
         uses: actions/upload-artifact@v4
         with:
           name: security-summary

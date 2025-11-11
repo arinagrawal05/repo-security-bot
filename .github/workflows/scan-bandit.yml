@@ -1,0 +1,33 @@
+name: "Scan: Bandit"
+
+on:
+  workflow_call:
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bandit
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+
+          if ls *.py >/dev/null 2>&1; then
+            pip install --upgrade pip bandit
+            bandit -r . -f json -o reports/bandit.json || true
+          else
+            echo '{"message":"No Python files found, skipped Bandit scan."}' > reports/bandit.json
+          fi
+
+          if [ ! -s reports/bandit.json ]; then
+            echo '{"message":"Bandit produced no output."}' > reports/bandit.json
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: reports/bandit.json

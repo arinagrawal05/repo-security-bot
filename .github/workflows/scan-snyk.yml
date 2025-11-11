@@ -1,0 +1,81 @@
+name: "Scan: Snyk"
+
+on:
+  workflow_call:
+    secrets:
+      SNYK_TOKEN:
+        required: false
+
+jobs:
+  snyk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@master
+
+      - name: Run Snyk Dependency Scan
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          mkdir -p reports
+
+          if [ -z "${SNYK_TOKEN:-}" ]; then
+            echo '{"message":"SNYK_TOKEN not provided, skipped Snyk scan."}' > reports/snyk.json
+            exit 0
+          fi
+
+          export SNYK_TOKEN
+          SCANNED=false
+
+          if [ -f "package.json" ]; then
+            snyk test --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
+            snyk test --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ -f "pom.xml" ]; then
+            snyk test --file=pom.xml --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ -f "go.mod" ]; then
+            snyk test --file=go.mod --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ -f "Cargo.toml" ]; then
+            snyk test --file=Cargo.toml --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ -f "composer.json" ]; then
+            snyk test --file=composer.json --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if ls *.csproj >/dev/null 2>&1; then
+            snyk test --json-file-output=reports/snyk.json || true
+            SCANNED=true
+          fi
+
+          if [ "${SCANNED}" = false ]; then
+            echo '{"message":"No dependency files found, skipped Snyk scan."}' > reports/snyk.json
+          fi
+
+          if [ ! -s reports/snyk.json ]; then
+            echo '{"message":"Snyk ran but produced no output."}' > reports/snyk.json
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-report
+          path: reports/snyk.json
