@@ -28,7 +28,7 @@ jobs:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-dockle.yml@main
 
   bandit:
-    uses: arinagrawal05/repo-security-bot/t/.github/workflows/scan-bandit.yml@main
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-bandit.yml@main
 
   # ---------------------------------------------------
   # 2. Summary job — runs AFTER all scans finish
