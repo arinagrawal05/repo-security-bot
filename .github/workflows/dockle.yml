@@ -1,0 +1,44 @@
+name: Dockle Security Scan
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dockle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t secure-image:latest .
+
+      - name: Run Dockle and generate reports
+        run: |
+          mkdir -p dockle-reports
+          
+          # Normal readable output
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            goodwithtech/dockle:latest secure-image:latest \
+            > dockle-reports/dockle-output.txt
+
+          # JSON report (if supported)
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            goodwithtech/dockle:latest -f json secure-image:latest \
+            > dockle-reports/dockle-output.json || true
+
+          # YAML report (backup)
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            goodwithtech/dockle:latest -f yaml secure-image:latest \
+            > dockle-reports/dockle-output.yaml || true
+
+      - name: Upload Dockle reports as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-security-report
+          path: dockle-reports
