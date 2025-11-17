@@ -1,3 +1,4 @@
+#Checkov: Sast scanning tool. Checkov scans Iac for security and compliance misconfigurations before deployment.
 name: "Scan: Checkov"
 
 on:
