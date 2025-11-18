@@ -1,3 +1,5 @@
+# this will detect hardcoded api secrets, tokens and keys that must be stored in enviroment
+
 name: "Gitleaks Scan"
 
 on:
