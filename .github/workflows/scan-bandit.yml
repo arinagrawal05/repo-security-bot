@@ -1,59 +1,41 @@
 name: "Scan: Bandit"
 
 on:
-  workflow_call:
+  workflow_call:   # This makes it a reusable workflow
 
 jobs:
   bandit:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Run Bandit Scan
+      - name: Run Bandit SAST Scan
         continue-on-error: true
         run: |
-          # Create segregated folder for Bandit
+          # Create segregated folder for Bandit reports
           mkdir -p reports/bandit
 
-          # Check if Python files exist
-          if ls *.py >/dev/null 2>&1; then
+          # Check if Python files exist in the repo
+          if ls **/*.py >/dev/null 2>&1; then
             pip install --upgrade pip bandit
 
-            # Run Bandit and output clean JSON
-            bandit -r . -f json -o reports/bandit/bandit_raw.json || true
+            # Run Bandit scan and output JSON
+            bandit -r . -f json -o reports/bandit/bandit.json || true
           else
             echo '{"message":"No Python files found, skipped Bandit scan."}' \
-              > reports/bandit/bandit_raw.json
+              > reports/bandit/bandit.json
           fi
 
-          # If empty file, add fallback message
-          if [ ! -s reports/bandit/bandit_raw.json ]; then
+          # If JSON file is empty or invalid, add fallback content
+          if [ ! -s reports/bandit/bandit.json ]; then
             echo '{"message":"Bandit produced no output."}' \
-              > reports/bandit/bandit_raw.json
+              > reports/bandit/bandit.json
           fi
 
-      - name: Create Clean Bandit Summary
-        run: |
-          # Create a clean readable report
-          jq '{
-            tool: "bandit",
-            total_issues: (.results | length),
-            issues: [
-              .results[] |
-              {
-                file: .filename,
-                line: .line_number,
-                severity: .issue_severity,
-                confidence: .issue_confidence,
-                test_id: .test_id,
-                message: .issue_text
-              }
-            ]
-          }' reports/bandit/bandit_raw.json > reports/bandit/bandit_clean.json
-
-      - name: Upload Bandit Artifacts
+      - name: Upload Bandit Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bandit-artifacts
-          path: reports/bandit/
+          name: bandit-report
+          path: reports/bandit/bandit.json
