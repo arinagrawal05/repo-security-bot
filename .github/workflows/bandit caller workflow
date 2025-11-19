@@ -1,0 +1,8 @@
+name: "Test Bandit Scan"
+
+on:
+  workflow_dispatch:   # run manually from Actions tab
+
+jobs:
+  call-bandit:
+    uses: ./.github/workflows/scan-bandit.yml
