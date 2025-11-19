@@ -1,5 +1,3 @@
-#Bandit: SAST scanning tool. Bandit scans Python code for security vulnerabilities and insecure coding patterns before deployment.
-
 name: "Scan: Bandit"
 
 on:
@@ -12,24 +10,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Bandit
+      - name: Run Bandit Scan
         continue-on-error: true
         run: |
-          mkdir -p reports
+          # Create segregated folder for Bandit
+          mkdir -p reports/bandit
 
+          # Check if Python files exist
           if ls *.py >/dev/null 2>&1; then
             pip install --upgrade pip bandit
-            bandit -r . -f json -o reports/bandit.json || true
+
+            # Run Bandit and output clean JSON
+            bandit -r . -f json -o reports/bandit/bandit_raw.json || true
           else
-            echo '{"message":"No Python files found, skipped Bandit scan."}' > reports/bandit.json
+            echo '{"message":"No Python files found, skipped Bandit scan."}' \
+              > reports/bandit/bandit_raw.json
           fi
 
-          if [ ! -s reports/bandit.json ]; then
-            echo '{"message":"Bandit produced no output."}' > reports/bandit.json
+          # If empty file, add fallback message
+          if [ ! -s reports/bandit/bandit_raw.json ]; then
+            echo '{"message":"Bandit produced no output."}' \
+              > reports/bandit/bandit_raw.json
           fi
 
-      - name: Upload artifact
+      - name: Create Clean Bandit Summary
+        run: |
+          # Create a clean readable report
+          jq '{
+            tool: "bandit",
+            total_issues: (.results | length),
+            issues: [
+              .results[] |
+              {
+                file: .filename,
+                line: .line_number,
+                severity: .issue_severity,
+                confidence: .issue_confidence,
+                test_id: .test_id,
+                message: .issue_text
+              }
+            ]
+          }' reports/bandit/bandit_raw.json > reports/bandit/bandit_clean.json
+
+      - name: Upload Bandit Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: bandit-report
-          path: reports/bandit.json
+          name: bandit-artifacts
+          path: reports/bandit/
