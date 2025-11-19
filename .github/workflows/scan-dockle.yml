@@ -24,7 +24,7 @@ jobs:
             echo "dockerfile=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build Docker image (if Dockerfile exists)
+      - name: Build Docker image
         if: steps.detect.outputs.dockerfile != ''
         run: |
           docker build -t security-image:latest -f "${{ steps.detect.outputs.dockerfile }}" . || true
@@ -41,26 +41,65 @@ jobs:
           if [ "${{ steps.detect.outputs.dockerfile }}" = "" ]; then
             echo '{"message":"No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
           else
+            # JSON output
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "${{ github.workspace }}/reports":/reports \
               goodwithtech/dockle:latest \
               -f json -o /reports/dockle.json security-image:latest || true
 
-            # Human readable text version
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               goodwithtech/dockle:latest security-image:latest \
               > reports/dockle.txt || true
           fi
 
-          # Ensure JSON exists
-          if [ ! -s reports/dockle.json ]; then
-            echo '{"message":"Dockle produced no output."}' > reports/dockle.json
+      ####################################################################
+      # 💎 BEAUTIFUL REPORT GENERATION (PRETTIFIED)
+      ####################################################################
+           - name: Generate Pretty Markdown Report
+        run: |
+          echo "## 🛡️ Dockle Security Summary" > reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          # Detect if JSON is valid array
+          TYPE=$(jq -r 'type' reports/dockle.json)
+
+          if [ "$TYPE" != "array" ]; then
+            echo "### ℹ️ Dockle did not produce issue list" >> reports/dockle.md
+            echo "" >> reports/dockle.md
+            echo "Raw Output:" >> reports/dockle.md
+            echo '```json' >> reports/dockle.md
+            cat reports/dockle.json >> reports/dockle.md
+            echo '```' >> reports/dockle.md
+            exit 0
           fi
 
-      - name: Upload Dockle artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dockle-security-report
-          path: reports/
+          # Extract counts
+          FATAL=$(jq '[.[] | select(.level=="FATAL")] | length' reports/dockle.json)
+          WARN=$(jq '[.[] | select(.level=="WARN")] | length' reports/dockle.json)
+          INFO=$(jq '[.[] | select(.level=="INFO")] | length' reports/dockle.json)
+
+          echo "### 🔍 Summary" >> reports/dockle.md
+          echo "- 🔴 **FATAL:** $FATAL" >> reports/dockle.md
+          echo "- 🟡 **WARN:** $WARN" >> reports/dockle.md
+          echo "- 🟢 **INFO:** $INFO" >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          #############################
+          echo "### 🔴 FATAL Issues" >> reports/dockle.md
+          echo "| Code | Message | File |" >> reports/dockle.md
+          echo "|------|---------|------|" >> reports/dockle.md
+          jq -r '.[] | select(.level=="FATAL") | "| \(.code) | \(.title) | \(.target) |"' reports/dockle.json >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          echo "### 🟡 WARN Issues" >> reports/dockle.md
+          echo "| Code | Message | File |" >> reports/dockle.md
+          echo "|------|---------|------|" >> reports/dockle.md
+          jq -r '.[] | select(.level=="WARN") | "| \(.code) | \(.title) | \(.target) |"' reports/dockle.json >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          echo "### 🟢 INFO Issues" >> reports/dockle.md
+          echo "| Code | Message | File |" >> reports/dockle.md
+          echo "|------|---------|------|" >> reports/dockle.md
+          jq -r '.[] | select(.level=="INFO") | "| \(.code) | \(.title) | \(.target) |"' reports/dockle.json >> reports/dockle.md

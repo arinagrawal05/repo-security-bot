@@ -1,3 +1,5 @@
+#Bandit: SAST scanning tool. Bandit scans Python code for security vulnerabilities and insecure coding patterns before deployment.
+
 name: "Scan: Bandit"
 
 on:
