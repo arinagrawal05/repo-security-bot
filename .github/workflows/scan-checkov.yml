@@ -150,23 +150,15 @@ jobs:
             exit 0
           fi
           
-          # Show raw content for debugging
-          echo "=== Raw checkov_results.json content ==="
-          cat reports/checkov_results.json
-          echo ""
-          
           # Validate JSON
           if ! jq empty reports/checkov_results.json 2>/dev/null; then
             echo "ERROR: Invalid JSON in checkov_results.json"
-            echo "First 500 chars:"
-            head -c 500 reports/checkov_results.json
-            echo ""
             echo "❌ *Report generation failed: invalid JSON format*" >> reports/checkov.md
             exit 0
           fi
           
-          # Check if array is empty
-          RESULT_COUNT=$(jq -e 'if type=="array" then length else 1 end' reports/checkov_results.json 2>/dev/null || echo "0")
+          # Check if array is empty - FIXED: use length without -e flag
+          RESULT_COUNT=$(jq 'if type=="array" then length else 1 end' reports/checkov_results.json 2>/dev/null || echo "0")
           echo "Result count: $RESULT_COUNT"
           
           if [ "$RESULT_COUNT" -eq 0 ]; then
@@ -175,25 +167,33 @@ jobs:
           fi
           
           # Loop through each scan block
-          jq -c '.[]' reports/checkov_results.json 2>/dev/null | while read item; do
+          jq -c '.[]' reports/checkov_results.json 2>/dev/null | while IFS= read -r item; do
             TYPE=$(echo "$item" | jq -r '.check_type // "unknown"')
             FAILED=$(echo "$item" | jq -r '.summary.failed // 0')
             PASSED=$(echo "$item" | jq -r '.summary.passed // 0')
+            SKIPPED=$(echo "$item" | jq -r '.summary.skipped // 0')
             
             echo "### 🛠 $TYPE Scan" >> reports/checkov.md
             echo "- 🔴 **FAILED:** $FAILED" >> reports/checkov.md
             echo "- 🟢 **PASSED:** $PASSED" >> reports/checkov.md
+            echo "- ⚪ **SKIPPED:** $SKIPPED" >> reports/checkov.md
             echo "" >> reports/checkov.md
             
             if [ "$FAILED" -gt 0 ]; then
               echo "#### ⚠ Issues Found" >> reports/checkov.md
+              echo "" >> reports/checkov.md
+              
+              # Parse failed checks
               echo "$item" | jq -r '
                 .results.failed_checks[]? |
-                "- 🔴 **\(.check_id): \(.check_name)**\n  - **Resource:** `\(.resource)`\n  - **File:** `\(.file_path):\(.file_line_range[0])`\n  - **Guideline:** \(.guideline // "N/A")\n"
+                "- 🔴 **\(.check_id): \(.check_name)**  \n  **Resource:** `\(.resource)`  \n  **File:** `\(.file_path // .file_abs_path | sub(".*/"; "")):\(.file_line_range[0])`  \n  **Guideline:** \(if .guideline then (.guideline | sub("^_+"; "") | sub("_+$"; "")) else "N/A" end)  \n"
               ' >> reports/checkov.md 2>/dev/null || echo "  - Error parsing failed checks" >> reports/checkov.md
+              
               echo "" >> reports/checkov.md
             fi
+            
             echo "---" >> reports/checkov.md
+            echo "" >> reports/checkov.md
           done
           
           echo ""
