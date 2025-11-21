@@ -73,11 +73,11 @@ jobs:
                 echo "Found **$COUNT** issues on Local Build." >> reports/nuclei.md
                 echo "" >> reports/nuclei.md
                 echo "### 🔍 Top Findings" >> reports/nuclei.md
-                echo "| Severity | Name | Path |" >> reports/nuclei.md
-                echo "| :--- | :--- | :--- |" >> reports/nuclei.md
+                echo "| Severity | Name |" >> reports/nuclei.md
+                echo "| :--- | :--- |" >> reports/nuclei.md
                 
                 # ⬇️ FIX IS HERE: Added output redirection (>>) ⬇️
-                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at // .template_id) |"' reports/clean.json >> reports/nuclei.md
+                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) |"' reports/clean.json >> reports/nuclei.md
              fi
           fi
 
