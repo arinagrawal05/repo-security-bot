@@ -28,8 +28,37 @@ jobs:
             echo '{"message":"Bandit produced no output."}' > reports/bandit.json
           fi
 
-      - name: Upload artifact
+      # ⭐ NEW STEP: create small JSON summary + MD file
+      - name: Generate Bandit summary markdown
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+          SUMMARY_JSON=$(jq -r '
+            {
+              tool: "bandit",
+              files_scanned: ([.metrics | keys[] | select(. != "_totals")] | length),
+              issues_total: (.results | length),
+              high: ([.results[]? | select(.issue_severity=="HIGH")] | length),
+              medium: ([.results[]? | select(.issue_severity=="MEDIUM")] | length),
+              low: ([.results[]? | select(.issue_severity=="LOW")] | length),
+              status: "completed"
+            }' reports/bandit.json)
+
+          mkdir -p reports
+          printf '%s\n' "$SUMMARY_JSON" > reports/bandit-summary.json
+
+          cat > reports/bandit-summary.md <<EOF
+# Bandit Security Summary
+
+\`\`\`json
+$SUMMARY_JSON
+\`\`\`
+
+EOF
+
+      # ⭐ UPDATED: upload the whole reports folder (JSON + MD)
+      - name: Upload Bandit artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bandit-report
-          path: reports/bandit.json
+          path: reports/
