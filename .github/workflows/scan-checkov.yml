@@ -13,37 +13,34 @@ jobs:
       - name: Install Checkov
         run: pip install --upgrade pip checkov
 
-      - name: Run Checkov
+      - name: Run Checkov and Normalize JSON
         continue-on-error: true
         run: |
           mkdir -p reports
-          checkov -d . -o json --no-guide | jq '.' > reports/checkov_results.json || echo "[]" > reports/checkov_results.json
 
-          if [ ! -s reports/checkov_results.json ]; then
-            echo "[]" > reports/checkov_results.json
-          fi
+          # Produce a VALID JSON ARRAY guaranteed
+          checkov -d . -o json --no-guide \
+            | jq -s '.' > reports/checkov_results.json || {
+              echo "[]" > reports/checkov_results.json
+            }
 
-      # 📝 NEW STEP: Generate List-Based Report (No Tables)
       - name: Generate Pretty Markdown Report
         run: |
           echo "## 🏗 Checkov IaC Security Report" > reports/checkov.md
           echo "" >> reports/checkov.md
 
-          if [ "$(cat reports/checkov_results.json)" == "[]" ]; then
-             echo "✅ *No misconfigurations found.*" >> reports/checkov.md
-             exit 0
+          # If empty array → no misconfigurations
+          if jq -e 'length == 0' reports/checkov_results.json > /dev/null; then
+            echo "✅ *No misconfigurations found.*" >> reports/checkov.md
+            exit 0
           fi
 
-          # Force input to array for consistent processing
-          jq -s 'if .[0] | type == "array" then .[0] else . end' reports/checkov_results.json > reports/checkov_clean.json
-
-          # Loop through scan types (Terraform, Docker, etc.)
-          jq -c '.[]' reports/checkov_clean.json | while read item; do
-            
+          # Loop through each check_type block
+          jq -c '.[]' reports/checkov_results.json | while read item; do
             TYPE=$(echo "$item" | jq -r '.check_type')
             FAILED=$(echo "$item" | jq -r '.summary.failed')
             PASSED=$(echo "$item" | jq -r '.summary.passed')
-            
+
             echo "### 🛠 $TYPE Scan" >> reports/checkov.md
             echo "- 🔴 *FAILED:* $FAILED" >> reports/checkov.md
             echo "- 🟢 *PASSED:* $PASSED" >> reports/checkov.md
@@ -51,13 +48,15 @@ jobs:
 
             if [ "$FAILED" -gt 0 ]; then
               echo "#### ⚠ Issues Found" >> reports/checkov.md
-              
-              # ⬇ CHANGED HERE: List output instead of Table ⬇
-              echo "$item" | jq -r '.results.failed_checks[] | "- 🔴 *\(.check_id): \(.check_name)\n  - **Resource:* \(.resource)\n  - *File:* \(.file_path):\(.file_line_range[0])\n"' | head -n 20 >> reports/checkov.md
-              
+
+              echo "$item" | jq -r '
+                .results.failed_checks[] |
+                "- 🔴 *\(.check_id): \(.check_name)*\n  - **Resource:** \(.resource)\n  - **File:** \(.file_path):\(.file_line_range[0])\n"
+              ' >> reports/checkov.md
+
               echo "" >> reports/checkov.md
             fi
-            
+
             echo "---" >> reports/checkov.md
           done
 
