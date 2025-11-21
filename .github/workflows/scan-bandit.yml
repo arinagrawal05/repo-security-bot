@@ -1,41 +1,78 @@
 name: "Scan: Bandit"
 
 on:
-  workflow_call:   # This makes it a reusable workflow
+  workflow_call:
 
 jobs:
   bandit:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run Bandit SAST Scan
+      - name: Run Bandit
         continue-on-error: true
         run: |
-          # Create segregated folder for Bandit reports
-          mkdir -p reports/bandit
+          mkdir -p reports
 
-          # Check if Python files exist in the repo
-          if ls **/*.py >/dev/null 2>&1; then
+          if ls *.py >/dev/null 2>&1; then
             pip install --upgrade pip bandit
-
-            # Run Bandit scan and output JSON
-            bandit -r . -f json -o reports/bandit/bandit.json || true
+            bandit -r . -f json -o reports/bandit.json || true
           else
-            echo '{"message":"No Python files found, skipped Bandit scan."}' \
-              > reports/bandit/bandit.json
+            echo '{"message":"No Python files found, skipped Bandit scan."}' > reports/bandit.json
           fi
 
-          # If JSON file is empty or invalid, add fallback content
-          if [ ! -s reports/bandit/bandit.json ]; then
-            echo '{"message":"Bandit produced no output."}' \
-              > reports/bandit/bandit.json
+          if [ ! -s reports/bandit.json ]; then
+            echo '{"message":"Bandit produced no output."}' > reports/bandit.json
           fi
 
-      - name: Upload Bandit Artifact
+      #  NEW STEP: create small JSON summary + clean Markdown file
+      - name: Generate Bandit summary markdown
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+          # Build compact JSON summary
+          SUMMARY_JSON=$(jq -r '
+            {
+              tool: "bandit",
+              files_scanned: ([.metrics | keys[] | select(. != "_totals")] | length),
+              issues_total: (.results | length),
+              high: ([.results[]? | select(.issue_severity=="HIGH")] | length),
+              medium: ([.results[]? | select(.issue_severity=="MEDIUM")] | length),
+              low: ([.results[]? | select(.issue_severity=="LOW")] | length),
+              status: "completed"
+            }' reports/bandit.json)
+
+          mkdir -p reports
+          printf '%s\n' "$SUMMARY_JSON" > reports/bandit-summary.json
+
+          # Extract values for pretty Markdown
+          FILES=$(echo "$SUMMARY_JSON" | jq -r '.files_scanned')
+          ISSUES=$(echo "$SUMMARY_JSON" | jq -r '.issues_total')
+          HIGH=$(echo "$SUMMARY_JSON" | jq -r '.high')
+          MEDIUM=$(echo "$SUMMARY_JSON" | jq -r '.medium')
+          LOW=$(echo "$SUMMARY_JSON" | jq -r '.low')
+
+          cat > reports/bandit.md <<EOF
+# Bandit Security Summary
+
+| Metric          | Value |
+|-----------------|-------|
+| Files scanned   | $FILES |
+| Total issues    | $ISSUES |
+| High severity   | $HIGH |
+| Medium severity | $MEDIUM |
+| Low severity    | $LOW |
+
+\`\`\`json
+$SUMMARY_JSON
+\`\`\`
+
+EOF
+
+      #  Upload the whole reports folder (bandit.json + summary JSON + Markdown)
+      - name: Upload Bandit artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bandit-report
-          path: reports/bandit/bandit.json
+          path: reports/
