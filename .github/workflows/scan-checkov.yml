@@ -49,92 +49,133 @@ jobs:
           
           if [ "$TF_COUNT" -eq 0 ]; then
             echo "ERROR: No Terraform files found in workspace!"
-            echo "[]" > reports/raw.json
+            echo "[]" > reports/checkov_results.json
           else
             echo "Running Checkov scan on root directory..."
             
-            # Use --output-file-path to write directly to file
-            # Checkov will create results_json.json in the reports directory
+            # Run Checkov and save output to file directly
             checkov --directory . --framework terraform --output json \
-              --output-file-path reports 2>&1 || true
+              --output-file-path reports 2>&1 | tee reports/checkov_output.log || true
             
             echo ""
-            echo "=== Files created in reports/ ==="
-            ls -la reports/
+            echo "=== All files in current directory ==="
+            find . -name "*.json" -type f
+            echo ""
+            echo "=== Files in reports/ ==="
+            ls -lah reports/
             echo ""
             
-            # Checkov creates results_json.json by default with --output-file-path
+            # Check multiple possible locations for the JSON file
             if [ -f "reports/results_json.json" ]; then
-              echo "Found results_json.json ($(wc -c < reports/results_json.json) bytes)"
-              cp reports/results_json.json reports/raw.json
-              
-              # Show first part of the file
-              echo "=== First 100 lines of results ==="
-              head -100 reports/raw.json
-              echo ""
+              echo "✓ Found reports/results_json.json"
+              cp reports/results_json.json reports/checkov_results.json
+            elif [ -f "results_json.json" ]; then
+              echo "✓ Found results_json.json in root"
+              cp results_json.json reports/checkov_results.json
+            elif [ -f "reports/results_json_terraform.json" ]; then
+              echo "✓ Found reports/results_json_terraform.json"
+              cp reports/results_json_terraform.json reports/checkov_results.json
             else
-              echo "ERROR: results_json.json not created!"
-              echo "Trying direct file scan as fallback..."
-              checkov --file main.tf --framework terraform --output json \
-                --output-file-path reports 2>&1 || true
+              echo "✗ No results JSON file found, creating from direct scan..."
               
-              if [ -f "reports/results_json.json" ]; then
-                cp reports/results_json.json reports/raw.json
+              # Try direct scan to single file
+              checkov --file main.tf --framework terraform --output json 2>&1 > reports/direct_scan.json || true
+              
+              if [ -s "reports/direct_scan.json" ] && jq empty reports/direct_scan.json 2>/dev/null; then
+                echo "✓ Direct scan produced valid JSON"
+                cp reports/direct_scan.json reports/checkov_results.json
               else
-                echo "[]" > reports/raw.json
+                echo "✗ Direct scan failed, using empty array"
+                echo "[]" > reports/checkov_results.json
               fi
             fi
           fi
           
-          # Validate JSON before processing
-          if jq empty reports/raw.json 2>/dev/null; then
-            echo "✓ Valid JSON detected"
+          # Validate and show what we have
+          echo ""
+          echo "=== Final checkov_results.json ==="
+          if [ -f "reports/checkov_results.json" ]; then
+            FILE_SIZE=$(wc -c < reports/checkov_results.json)
+            echo "File size: $FILE_SIZE bytes"
             
-            # Check structure and normalize
-            RAW_TYPE=$(jq -r 'type' reports/raw.json)
-            echo "JSON type: $RAW_TYPE"
-            
-            if [ "$RAW_TYPE" = "object" ]; then
-              echo "Wrapping object in array..."
-              jq '[.]' reports/raw.json > reports/checkov_results.json
-            elif [ "$RAW_TYPE" = "array" ]; then
-              echo "Already an array, copying..."
-              cp reports/raw.json reports/checkov_results.json
+            if [ "$FILE_SIZE" -gt 0 ]; then
+              echo "First 1000 characters:"
+              head -c 1000 reports/checkov_results.json
+              echo ""
+              echo "..."
+              echo ""
+              
+              # Try to validate and get type
+              if jq empty reports/checkov_results.json 2>/dev/null; then
+                JSON_TYPE=$(jq -r 'type' reports/checkov_results.json)
+                echo "✓ Valid JSON (type: $JSON_TYPE)"
+                
+                # Normalize to array if needed
+                if [ "$JSON_TYPE" = "object" ]; then
+                  echo "Wrapping object in array..."
+                  jq '[.]' reports/checkov_results.json > reports/checkov_results_normalized.json
+                  mv reports/checkov_results_normalized.json reports/checkov_results.json
+                fi
+              else
+                echo "✗ Invalid JSON detected"
+                jq empty reports/checkov_results.json 2>&1 | head -5
+                echo "Using empty array as fallback"
+                echo "[]" > reports/checkov_results.json
+              fi
             else
-              echo "Unexpected type, wrapping anyway..."
-              jq -s '.' reports/raw.json > reports/checkov_results.json
+              echo "✗ File is empty"
+              echo "[]" > reports/checkov_results.json
             fi
           else
-            echo "✗ Invalid JSON detected, using empty array"
+            echo "✗ File doesn't exist"
             echo "[]" > reports/checkov_results.json
           fi
-          
-          # Show final results summary
-          echo ""
-          echo "=== Final Results Summary ==="
-          jq -r 'if type=="array" then 
-                   if length == 0 then "No results" 
-                   else "Found \(length) result block(s)" 
-                   end
-                 elif type=="object" then 
-                   "Single object result (check_type: \(.check_type // "unknown"))"
-                 else 
-                   "Unexpected format"
-                 end' reports/checkov_results.json
       
       - name: Generate Pretty Markdown Report
         run: |
           echo "## 🏗 Checkov IaC Security Report" > reports/checkov.md
           echo "" >> reports/checkov.md
           
-          # If JSON array is empty → no findings
-          if jq -e 'length == 0' reports/checkov_results.json > /dev/null; then
-            echo "✅ *No misconfigurations found (or no IaC files detected).*" >> reports/checkov.md
+          # First, validate the JSON file exists and is readable
+          if [ ! -f "reports/checkov_results.json" ]; then
+            echo "ERROR: checkov_results.json not found!"
+            echo "❌ *Report generation failed: results file not found*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Check if file is empty
+          if [ ! -s "reports/checkov_results.json" ]; then
+            echo "ERROR: checkov_results.json is empty!"
+            echo "❌ *Report generation failed: results file is empty*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Show raw content for debugging
+          echo "=== Raw checkov_results.json content ==="
+          cat reports/checkov_results.json
+          echo ""
+          
+          # Validate JSON
+          if ! jq empty reports/checkov_results.json 2>/dev/null; then
+            echo "ERROR: Invalid JSON in checkov_results.json"
+            echo "First 500 chars:"
+            head -c 500 reports/checkov_results.json
+            echo ""
+            echo "❌ *Report generation failed: invalid JSON format*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Check if array is empty
+          RESULT_COUNT=$(jq -e 'if type=="array" then length else 1 end' reports/checkov_results.json 2>/dev/null || echo "0")
+          echo "Result count: $RESULT_COUNT"
+          
+          if [ "$RESULT_COUNT" -eq 0 ]; then
+            echo "✅ *No misconfigurations found.*" >> reports/checkov.md
             exit 0
           fi
           
           # Loop through each scan block
-          jq -c '.[]' reports/checkov_results.json | while read item; do
+          jq -c '.[]' reports/checkov_results.json 2>/dev/null | while read item; do
             TYPE=$(echo "$item" | jq -r '.check_type // "unknown"')
             FAILED=$(echo "$item" | jq -r '.summary.failed // 0')
             PASSED=$(echo "$item" | jq -r '.summary.passed // 0')
@@ -149,11 +190,15 @@ jobs:
               echo "$item" | jq -r '
                 .results.failed_checks[]? |
                 "- 🔴 **\(.check_id): \(.check_name)**\n  - **Resource:** `\(.resource)`\n  - **File:** `\(.file_path):\(.file_line_range[0])`\n  - **Guideline:** \(.guideline // "N/A")\n"
-              ' >> reports/checkov.md
+              ' >> reports/checkov.md 2>/dev/null || echo "  - Error parsing failed checks" >> reports/checkov.md
               echo "" >> reports/checkov.md
             fi
             echo "---" >> reports/checkov.md
           done
+          
+          echo ""
+          echo "=== Generated Markdown Report ==="
+          cat reports/checkov.md
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
