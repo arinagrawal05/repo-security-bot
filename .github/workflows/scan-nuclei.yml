@@ -54,6 +54,8 @@ jobs:
           flags: "-tags cve,misconfig,exposure,token -jsonl -o reports/nuclei.json"
 
       # 5. Parse Report
+      # 5. Parse Report
+      # 5. Parse Report
       - name: Generate Report
         if: always()
         run: |
@@ -78,3 +80,15 @@ jobs:
                 jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at // .template_id) |"' reports/clean.json >> reports/nuclei.md
              fi
           fi
+
+      # ⬇️ THIS WAS MISSING ⬇️
+      - name: Upload Nuclei Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-report
+          path: reports/nuclei.md
+
+      - name: Stop Container
+        if: always()
+        run: docker stop test-container || true
