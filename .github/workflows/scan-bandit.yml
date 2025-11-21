@@ -51,21 +51,21 @@ jobs:
           MEDIUM=$(echo "$SUMMARY_JSON" | jq -r '.medium')
           LOW=$(echo "$SUMMARY_JSON" | jq -r '.low')
 
-cat <<'EOF' > reports/bandit-report/bandit.md
+          cat <<EOF > reports/bandit-report/bandit.md
+          # Bandit Security Summary
 
-| Metric          | Value |
-|-----------------|-------|
-| Files scanned   | $FILES |
-| Total issues    | $ISSUES |
-| High severity   | $HIGH |
-| Medium severity | $MEDIUM |
-| Low severity    | $LOW |
+          | Metric          | Value |
+          |-----------------|-------|
+          | Files scanned   | $FILES |
+          | Total issues    | $ISSUES |
+          | High severity   | $HIGH |
+          | Medium severity | $MEDIUM |
+          | Low severity    | $LOW |
 
-\`\`\`json
-$SUMMARY_JSON
-\`\`\`
-
-EOF
+          \`\`\`json
+          $SUMMARY_JSON
+          \`\`\`
+          EOF
 
       - name: Upload Bandit artifacts
         uses: actions/upload-artifact@v4
