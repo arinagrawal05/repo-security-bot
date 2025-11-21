@@ -10,63 +10,73 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. BUILD the App
+      # 1. BUILD the App from your Dockerfile
       - name: Build Docker Image
         run: docker build -t my-app:test .
 
       # 2. RUN the App in Background
       - name: Start Container
         run: |
-          # Map port 3000 (Runner) -> 3000 (Container)
-          # Adjust these numbers if your app uses port 80 or 8080!
+          # ⚠️ IMPORTANT: Check your Dockerfile EXPOSE port.
+          # If your app runs on port 80, change this to: -p 3000:80
           docker run -d -p 3000:3000 --name test-container my-app:test
           
-          # Critical: Wait for app to wake up
-          echo "Waiting for app to start..."
+          # Wait for app to start (Loop 30 times, wait 1 sec each)
+          echo "Waiting for app to start on localhost:3000..."
           for i in {1..30}; do
             if curl -s http://localhost:3000 > /dev/null; then
-              echo "App is up!"
+              echo "✅ App is up!"
               break
             fi
+            echo "..."
             sleep 1
           done
 
       # 3. ATTACK with Nuclei
-      # Replaces the ZAP step entirely
       - name: Run Nuclei DAST Scan
-        uses: projectdiscovery/nuclei-action@v1
+        uses: projectdiscovery/nuclei-action@main  # <--- FIXED: Uses valid tag
         with:
           target: "http://localhost:3000"
-          # Use 'cves' and 'misconfiguration' templates
-          tags: "cve,misconfig,exposure"
+          # Fast check for CVEs and misconfigurations only
+          tags: "cve,misconfig,exposure,token"
           json: true
           output: reports/nuclei.json
 
-      # 4. Parse Report (JSON -> Markdown)
+      # 4. Parse Report (Safe Mode)
       - name: Generate Report
-        if: always() # Run even if nuclei finds bugs
+        if: always()
         run: |
           mkdir -p reports
           echo "## ☢️ Nuclei DAST Report" > reports/nuclei.md
           
+          # Check if the report file exists and has size
           if [ ! -s reports/nuclei.json ]; then
-             echo "✅ **No vulnerabilities found.**" >> reports/nuclei.md
+             echo "✅ **No vulnerabilities found (or scan failed to connect).**" >> reports/nuclei.md
           else
-             # Quick parser for the top findings
+             # FIX: "Slurp" (-s) the NDJSON lines into a single array for jq
              jq -s '.' reports/nuclei.json > reports/clean.json
-             COUNT=$(jq 'length' reports/clean.json)
-             echo "Found $COUNT issues on Local Build." >> reports/nuclei.md
              
-             echo "### Top Findings" >> reports/nuclei.md
-             echo "| Severity | Name |" >> reports/nuclei.md
-             echo "| :--- | :--- |" >> reports/nuclei.md
-             jq -r '.[] | "| **\(.info.severity)** | \(.info.name) |"' reports/clean.json | head -n 10 >> reports/nuclei.md
+             # Count Issues
+             COUNT=$(jq 'length' reports/clean.json)
+             
+             if [ "$COUNT" == "0" ]; then
+                echo "✅ **No vulnerabilities found.**" >> reports/nuclei.md
+             else
+                echo "Found **$COUNT** issues on Local Build." >> reports/nuclei.md
+                echo "" >> reports/nuclei.md
+                echo "### 🔍 Top Findings" >> reports/nuclei.md
+                echo "| Severity | Name | Path |" >> reports/nuclei.md
+                echo "| :--- | :--- | :--- |" >> reports/nuclei.md
+                
+                # Generate table rows
+                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at) |"' reports/clean.json | head -n 10 >> reports/nuclei.md
+             fi
           fi
 
       # 5. Cleanup
       - name: Stop Container
         if: always()
-        run: docker stop test-container
+        run: docker stop test-container || true
       
       - uses: actions/upload-artifact@v4
         with:
