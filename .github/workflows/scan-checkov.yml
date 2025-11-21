@@ -1,6 +1,10 @@
 name: "Scan: Checkov"
 on:
-  workflow_call:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:  # Manual trigger
+  workflow_call:      # Can also be called by other workflows
 jobs:
   checkov:
     runs-on: ubuntu-latest
@@ -17,42 +21,96 @@ jobs:
           echo "=== Current Directory ==="
           pwd
           echo ""
-          echo "=== All Files ==="
-          ls -la
+          echo "=== All Files (tree view) ==="
+          find . -type f -not -path '*/\.git/*' | head -50
           echo ""
           echo "=== Terraform Files ==="
-          find . -name "*.tf" -type f
+          find . -name "*.tf" -type f -exec echo "Found: {}" \; -exec cat {} \;
           echo ""
           echo "=== Checkov Version ==="
           checkov --version
+          echo ""
+          echo "=== Test Checkov directly on file if it exists ==="
+          if [ -f "main.tf" ]; then
+            echo "main.tf exists, testing direct scan:"
+            checkov -f main.tf --compact || echo "Direct scan failed"
+          else
+            echo "main.tf NOT FOUND in $(pwd)"
+          fi
       
       - name: Run Checkov and Produce Clean JSON
         continue-on-error: true
         run: |
           mkdir -p reports
           
-          # Try to find and scan terraform files explicitly
-          if find . -name "*.tf" -type f | grep -q .; then
-            echo "Found Terraform files, running Checkov..."
-            checkov -d . --framework terraform -o json --compact \
-              > reports/raw.json 2>&1 || echo "[]" > reports/raw.json
-          else
-            echo "No .tf files found in workspace"
+          # Count terraform files
+          TF_COUNT=$(find . -name "*.tf" -type f -not -path '*/\.git/*' | wc -l)
+          echo "Found $TF_COUNT .tf files"
+          
+          if [ "$TF_COUNT" -eq 0 ]; then
+            echo "ERROR: No Terraform files found in workspace!"
             echo "[]" > reports/raw.json
+          else
+            echo "Running Checkov scan on root directory..."
+            
+            # Capture stdout and stderr separately
+            checkov --directory . --framework terraform --output json \
+              --output-file-path reports 2>reports/stderr.log 1>reports/stdout.log || true
+            
+            echo "=== Checkov stderr ==="
+            cat reports/stderr.log || echo "No stderr"
+            echo ""
+            echo "=== Checkov stdout ==="  
+            cat reports/stdout.log || echo "No stdout"
+            echo ""
+            
+            # Check what files were created
+            echo "=== Files in reports/ ==="
+            ls -la reports/
+            
+            # Checkov creates results_json.json by default
+            if [ -f "reports/results_json.json" ]; then
+              echo "Found results_json.json, using it..."
+              cp reports/results_json.json reports/raw.json
+            elif [ -f "reports/stdout.log" ] && [ -s "reports/stdout.log" ]; then
+              echo "Using stdout as raw data..."
+              cp reports/stdout.log reports/raw.json
+            else
+              echo "No results found, trying direct file scan..."
+              checkov --file main.tf --framework terraform --output json \
+                --output-file-path reports 2>&1 || echo "[]" > reports/raw.json
+              
+              if [ -f "reports/results_json.json" ]; then
+                cp reports/results_json.json reports/raw.json
+              fi
+            fi
+            
+            # Fallback to empty array if still nothing
+            if [ ! -f "reports/raw.json" ]; then
+              echo "[]" > reports/raw.json
+            fi
           fi
           
           # Show raw output for debugging
-          echo "=== Raw Checkov Output ==="
-          cat reports/raw.json
+          echo "=== Raw Checkov Output (first 200 lines) ==="
+          head -200 reports/raw.json
           echo ""
+          echo "=== File size ==="
+          ls -lh reports/raw.json
+          
+          # Check if raw.json is actually empty or just []
+          if [ -f "reports/raw.json" ]; then
+            RAW_SIZE=$(cat reports/raw.json | jq -e 'if type=="array" then length elif type=="object" then 1 else 0 end' 2>/dev/null || echo "0")
+            echo "Raw JSON contains $RAW_SIZE elements"
+          fi
           
           # Normalize: if raw.json is an object → wrap into an array
           jq 'if type=="object" then [.] else . end' reports/raw.json \
             > reports/checkov_results.json 2>/dev/null || echo "[]" > reports/checkov_results.json
           
           # Debug output
-          echo "=== Processed Results ==="
-          cat reports/checkov_results.json
+          echo "=== Processed Results (pretty) ==="
+          cat reports/checkov_results.json | jq '.' || cat reports/checkov_results.json
       
       - name: Generate Pretty Markdown Report
         run: |
