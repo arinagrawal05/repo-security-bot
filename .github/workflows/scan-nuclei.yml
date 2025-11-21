@@ -73,18 +73,8 @@ jobs:
                 echo "### 🔍 Top Findings" >> reports/nuclei.md
                 echo "| Severity | Name | Path |" >> reports/nuclei.md
                 echo "| :--- | :--- | :--- |" >> reports/nuclei.md
-                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at // .template_id) |"' reports/clean.json
+                
+                # ⬇️ FIX IS HERE: Added output redirection (>>) ⬇️
+                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at // .template_id) |"' reports/clean.json >> reports/nuclei.md
              fi
           fi
-
-      # ⬇️ THIS WAS MISSING ⬇️
-      - name: Upload Nuclei Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuclei-report
-          path: reports/nuclei.md
-
-      - name: Stop Container
-        if: always()
-        run: docker stop test-container || true
