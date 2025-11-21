@@ -55,7 +55,7 @@ jobs:
       ####################################################################
       # 💎 BEAUTIFUL REPORT GENERATION (PRETTIFIED)
       ####################################################################
-           - name: Generate Pretty Markdown Report
+      - name: Generate Pretty Markdown Report
         run: |
           echo "## 🛡️ Dockle Security Summary" > reports/dockle.md
           echo "" >> reports/dockle.md
