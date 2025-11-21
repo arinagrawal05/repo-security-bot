@@ -26,7 +26,7 @@ jobs:
             echo '{"message":"Bandit produced no output."}' > reports/bandit.json
           fi
 
-      - name: Generate Bandit summary markdown
+      - name: Generate Bandit summary markdown (NO TABLE)
         run: |
           sudo apt-get update && sudo apt-get install -y jq
 
@@ -43,25 +43,12 @@ jobs:
 
           mkdir -p reports/bandit-report
 
-          # Save compact JSON summary
           printf '%s\n' "$SUMMARY_JSON" > reports/bandit-report/bandit-summary.json
 
-          FILES=$(echo "$SUMMARY_JSON" | jq -r '.files_scanned')
-          ISSUES=$(echo "$SUMMARY_JSON" | jq -r '.issues_total')
-          HIGH=$(echo "$SUMMARY_JSON" | jq -r '.high')
-          MEDIUM=$(echo "$SUMMARY_JSON" | jq -r '.medium')
-          LOW=$(echo "$SUMMARY_JSON" | jq -r '.low')
-
           {
-            echo '# Bandit Security Summary'
+            echo "# Bandit Security Summary"
             echo
-            echo '| Metric          | Value |'
-            echo '|-----------------|-------|'
-            echo "| Files scanned   | $FILES |"
-            echo "| Total issues    | $ISSUES |"
-            echo "| High severity   | $HIGH |"
-            echo "| Medium severity | $MEDIUM |"
-            echo "| Low severity    | $LOW |"
+            echo "Below is the Bandit scan summary in JSON format:"
             echo
             echo '```json'
             echo "$SUMMARY_JSON"
