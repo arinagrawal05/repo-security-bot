@@ -1,0 +1,45 @@
+name: "Scan: Jit"
+
+on:
+  workflow_call:
+
+jobs:
+  jit-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python (if needed for script)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Placeholder for installing Jit or dependencies
+      - name: Install dependencies
+        run: |
+          pip install requests # Example dependency
+
+      - name: Run Jit Scan
+        continue-on-error: true
+        run: |
+          # REPLACE THIS with your actual Jit execution command
+          # Example: python scripts/run_jit.py > jit_output.txt
+          
+          echo "Running Jit Security checks..."
+          
+          # Simulating a report generation for the summary bot
+          echo "### Jit Security Scan Results" > jit.md
+          echo "| Severity | Issue | Location |" >> jit.md
+          echo "| :--- | :--- | :--- |" >> jit.md
+          echo "| LOW | Example Issue | scan-jit.yml |" >> jit.md
+          
+          # If you have a script that generates JSON, convert it to MD here.
+
+      # Upload the artifact specifically named 'jit-report' containing 'jit.md'
+      # This is required for the summary job to pick it up automatically.
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-report
+          path: jit.md

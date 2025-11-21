@@ -16,10 +16,9 @@ jobs:
   gitleaks:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-gitleaks.yml@main
 
-  snyk:
-    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-snyk.yml@main
-    secrets:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  # Moved Bandit here (replacing Snyk)
+  bandit:
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-bandit.yml@main
 
   checkov:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-checkov.yml@main
@@ -27,20 +26,24 @@ jobs:
   dockle:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-dockle.yml@main
 
-  bandit:
-    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-bandit.yml@main
+  # Added Jit scanner
+  jit:
+    uses: arinagrawal05/repo-security-bot/.github/workflows/scan-jit.yml@main
 
   # ---------------------------------------------------
   # Summary Job
   # ---------------------------------------------------
   generate-summary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     needs:
       - gitleaks
-      - snyk
+      - bandit
       - checkov
       - dockle
-      - bandit
+      - jit
 
     steps:
       - name: Checkout repo
@@ -61,7 +64,10 @@ jobs:
           echo "" >> "$SUMMARY"
 
           # Include each scanner's Markdown if exists
-          for scanner in gitleaks snyk checkov dockle bandit; do
+          # Snyk removed, Bandit moved up, Jit added
+          for scanner in gitleaks bandit checkov dockle jit; do
+            # Note: Ensure the artifacts are named appropriately in their respective workflows
+            # e.g., 'jit-report' containing 'jit.md'
             if [ -f reports/${scanner}-report/${scanner}.md ]; then
               echo "## ${scanner^^} Report" >> "$SUMMARY"
               cat reports/${scanner}-report/${scanner}.md >> "$SUMMARY"
@@ -77,3 +83,11 @@ jobs:
         with:
           name: security-summary
           path: reports/security-summary.md
+
+      - name: Create GitHub Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "🔒 Security Summary Report: $(date +'%Y-%m-%d')" \
+            --body-file reports/security-summary.md
