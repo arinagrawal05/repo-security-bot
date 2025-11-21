@@ -51,8 +51,7 @@ jobs:
           MEDIUM=$(echo "$SUMMARY_JSON" | jq -r '.medium')
           LOW=$(echo "$SUMMARY_JSON" | jq -r '.low')
 
-          cat <<EOF > reports/bandit-report/bandit.md
-# Bandit Security Summary
+cat <<'EOF' > reports/bandit-report/bandit.md
 
 | Metric          | Value |
 |-----------------|-------|
