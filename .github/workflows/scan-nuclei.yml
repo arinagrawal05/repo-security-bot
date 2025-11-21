@@ -10,53 +10,52 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. BUILD the App from your Dockerfile
+      # 1. BUILD the App
       - name: Build Docker Image
         run: docker build -t my-app:test .
 
-      # 2. RUN the App in Background
+      # 2. RUN the App
       - name: Start Container
         run: |
-          # ⚠️ IMPORTANT: Check your Dockerfile EXPOSE port.
-          # If your app runs on port 80, change this to: -p 3000:80
+          # Start container in background
           docker run -d -p 3000:3000 --name test-container my-app:test
           
-          # Wait for app to start (Loop 30 times, wait 1 sec each)
+          # Robust Wait Loop
           echo "Waiting for app to start on localhost:3000..."
           for i in {1..30}; do
             if curl -s http://localhost:3000 > /dev/null; then
               echo "✅ App is up!"
               break
             fi
-            echo "..."
+            echo "Waiting... ($i/30)"
             sleep 1
           done
 
-      # 3. ATTACK with Nuclei
+      # 3. ATTACK with Nuclei (Fixed)
       - name: Run Nuclei DAST Scan
-        uses: projectdiscovery/nuclei-action@main  # <--- FIXED: Uses valid tag
+        uses: projectdiscovery/nuclei-action@main
         with:
           target: "http://localhost:3000"
-          # Fast check for CVEs and misconfigurations only
-          tags: "cve,misconfig,exposure,token"
-          json: true
-          output: reports/nuclei.json
+          # ⚠️ FIX: Pass everything via 'flags' to avoid Action/Binary version conflicts
+          # -jsonl: New flag for JSON Lines output (replaces -json)
+          # -tags: Filters the checks
+          # -o: Output file
+          flags: "-tags cve,misconfig,exposure,token -jsonl -o reports/nuclei.json"
 
-      # 4. Parse Report (Safe Mode)
+      # 4. Parse Report
       - name: Generate Report
         if: always()
         run: |
           mkdir -p reports
           echo "## ☢️ Nuclei DAST Report" > reports/nuclei.md
           
-          # Check if the report file exists and has size
+          # Check if report exists
           if [ ! -s reports/nuclei.json ]; then
              echo "✅ **No vulnerabilities found (or scan failed to connect).**" >> reports/nuclei.md
           else
-             # FIX: "Slurp" (-s) the NDJSON lines into a single array for jq
+             # Convert JSON Lines (NDJSON) to JSON Array for jq
              jq -s '.' reports/nuclei.json > reports/clean.json
              
-             # Count Issues
              COUNT=$(jq 'length' reports/clean.json)
              
              if [ "$COUNT" == "0" ]; then
@@ -68,7 +67,6 @@ jobs:
                 echo "| Severity | Name | Path |" >> reports/nuclei.md
                 echo "| :--- | :--- | :--- |" >> reports/nuclei.md
                 
-                # Generate table rows
                 jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at) |"' reports/clean.json | head -n 10 >> reports/nuclei.md
              fi
           fi
