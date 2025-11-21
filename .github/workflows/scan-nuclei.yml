@@ -73,7 +73,7 @@ jobs:
                 echo "### 🔍 Top Findings" >> reports/nuclei.md
                 echo "| Severity | Name | Path |" >> reports/nuclei.md
                 echo "| :--- | :--- | :--- |" >> reports/nuclei.md
-                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at) |"' reports/clean.json | head -n 10 >> reports/nuclei.md
+                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at // .template_id) |"' reports/clean.json
              fi
           fi
 
