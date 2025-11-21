@@ -43,6 +43,7 @@ jobs:
 
           mkdir -p reports/bandit-report
 
+          # Save compact JSON summary
           printf '%s\n' "$SUMMARY_JSON" > reports/bandit-report/bandit-summary.json
 
           FILES=$(echo "$SUMMARY_JSON" | jq -r '.files_scanned')
@@ -51,21 +52,21 @@ jobs:
           MEDIUM=$(echo "$SUMMARY_JSON" | jq -r '.medium')
           LOW=$(echo "$SUMMARY_JSON" | jq -r '.low')
 
-          cat <<EOF > reports/bandit-report/bandit.md
-          # Bandit Security Summary
-
-          | Metric          | Value |
-          |-----------------|-------|
-          | Files scanned   | $FILES |
-          | Total issues    | $ISSUES |
-          | High severity   | $HIGH |
-          | Medium severity | $MEDIUM |
-          | Low severity    | $LOW |
-
-          \`\`\`json
-          $SUMMARY_JSON
-          \`\`\`
-          EOF
+          {
+            echo '# Bandit Security Summary'
+            echo
+            echo '| Metric          | Value |'
+            echo '|-----------------|-------|'
+            echo "| Files scanned   | $FILES |"
+            echo "| Total issues    | $ISSUES |"
+            echo "| High severity   | $HIGH |"
+            echo "| Medium severity | $MEDIUM |"
+            echo "| Low severity    | $LOW |"
+            echo
+            echo '```json'
+            echo "$SUMMARY_JSON"
+            echo '```'
+          } > reports/bandit-report/bandit.md
 
       - name: Upload Bandit artifacts
         uses: actions/upload-artifact@v4
