@@ -1,4 +1,3 @@
-#Checkov: Sast scanning tool. Checkov scans Iac for security and compliance misconfigurations before deployment.
 name: "Scan: Checkov"
 
 on:
@@ -24,8 +23,46 @@ jobs:
             echo "[]" > reports/checkov_results.json
           fi
 
+      # 📝 NEW STEP: Generate List-Based Report (No Tables)
+      - name: Generate Pretty Markdown Report
+        run: |
+          echo "## 🏗 Checkov IaC Security Report" > reports/checkov.md
+          echo "" >> reports/checkov.md
+
+          if [ "$(cat reports/checkov_results.json)" == "[]" ]; then
+             echo "✅ *No misconfigurations found.*" >> reports/checkov.md
+             exit 0
+          fi
+
+          # Force input to array for consistent processing
+          jq -s 'if .[0] | type == "array" then .[0] else . end' reports/checkov_results.json > reports/checkov_clean.json
+
+          # Loop through scan types (Terraform, Docker, etc.)
+          jq -c '.[]' reports/checkov_clean.json | while read item; do
+            
+            TYPE=$(echo "$item" | jq -r '.check_type')
+            FAILED=$(echo "$item" | jq -r '.summary.failed')
+            PASSED=$(echo "$item" | jq -r '.summary.passed')
+            
+            echo "### 🛠 $TYPE Scan" >> reports/checkov.md
+            echo "- 🔴 *FAILED:* $FAILED" >> reports/checkov.md
+            echo "- 🟢 *PASSED:* $PASSED" >> reports/checkov.md
+            echo "" >> reports/checkov.md
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "#### ⚠ Issues Found" >> reports/checkov.md
+              
+              # ⬇ CHANGED HERE: List output instead of Table ⬇
+              echo "$item" | jq -r '.results.failed_checks[] | "- 🔴 *\(.check_id): \(.check_name)\n  - **Resource:* \(.resource)\n  - *File:* \(.file_path):\(.file_line_range[0])\n"' | head -n 20 >> reports/checkov.md
+              
+              echo "" >> reports/checkov.md
+            fi
+            
+            echo "---" >> reports/checkov.md
+          done
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: checkov-report
-          path: reports/checkov_results.json
+          path: reports/checkov.md
