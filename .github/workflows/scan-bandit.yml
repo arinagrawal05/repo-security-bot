@@ -2,7 +2,14 @@
 name: "Scan: Bandit"
 
 on:
-  workflow_call:
+  push:
+    branches: 
+      - main
+      - add-bandit-scan   # ← your personal branch name (change if needed)
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   bandit:
@@ -15,66 +22,17 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p reports
-
-          # Check if any python files exist in current directory or subdirectories
-          if find . -name "*.py" | grep -q .; then
+          if ls *.py >/dev/null 2>&1; then
             pip install --upgrade pip bandit
-            # -r: recursive, -f: format, -o: output
             bandit -r . -f json -o reports/bandit.json || true
           else
             echo '{"message":"No Python files found, skipped Bandit scan."}' > reports/bandit.json
           fi
-
-          # Fail-safe if file is empty
           if [ ! -s reports/bandit.json ]; then
             echo '{"message":"Bandit produced no output."}' > reports/bandit.json
           fi
-
-      # ⭐ BEAUTIFUL REPORT GENERATION (Consistent with Dockle/Trivy)
-      - name: Generate Pretty Markdown Report
-        run: |
-          echo "## 🐍 Bandit Security Report" > reports/bandit.md
-          echo "" >> reports/bandit.md
-
-          # 1. Check if we have a "message" key (meaning we skipped or failed)
-          MESSAGE=$(jq -r '.message // empty' reports/bandit.json)
-
-          if [ ! -z "$MESSAGE" ]; then
-             echo "✅ **$MESSAGE**" >> reports/bandit.md
-             # Create a dummy summary for consistency
-             echo '{}' > reports/bandit-summary.json
-             exit 0
-          fi
-
-          # 2. If we are here, we have real Bandit data
-          # Extract counts
-          TOTAL=$(jq '.results | length' reports/bandit.json)
-          HIGH=$(jq '[.results[] | select(.issue_severity=="HIGH")] | length' reports/bandit.json)
-          MEDIUM=$(jq '[.results[] | select(.issue_severity=="MEDIUM")] | length' reports/bandit.json)
-          LOW=$(jq '[.results[] | select(.issue_severity=="LOW")] | length' reports/bandit.json)
-
-          # Write Summary
-          echo "### 🔍 Summary" >> reports/bandit.md
-          echo "- 🔴 **HIGH:** $HIGH" >> reports/bandit.md
-          echo "- 🟠 **MEDIUM:** $MEDIUM" >> reports/bandit.md
-          echo "- 🟡 **LOW:** $LOW" >> reports/bandit.md
-          echo "- ⚪ **TOTAL:** $TOTAL" >> reports/bandit.md
-          echo "" >> reports/bandit.md
-
-          # Write Table of Top Issues
-          echo "### 📋 Details" >> reports/bandit.md
-          echo "| Severity | Issue | File | Line |" >> reports/bandit.md
-          echo "| :--- | :--- | :--- | :--- |" >> reports/bandit.md
-          
-          # Iterate through results and make table rows (Limit to top 15 to avoid huge comments)
-          jq -r '.results[] | "| **\(.issue_severity)** | \(.test_name) | \(.filename) | \(.line_number) |"' reports/bandit.json | head -n 15 >> reports/bandit.md
-
-          echo "" >> reports/bandit.md
-          echo "_See artifact for full JSON report._" >> reports/bandit.md
-
-      # ⭐ UPDATED: Upload the specific MD file so the Summary Bot can find it
-      - name: Upload Bandit artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bandit-report
-          path: reports/bandit.md
+          path: reports/bandit.json
