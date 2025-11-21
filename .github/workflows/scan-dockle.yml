@@ -44,12 +44,8 @@ jobs:
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "${{ github.workspace }}/reports":/reports \
               goodwithtech/dockle:latest \
+              --exit-code 0 \
               -f json -o /reports/dockle.json security-image:latest || true
-
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              goodwithtech/dockle:latest security-image:latest \
-              > reports/dockle.txt || true
           fi
 
       ####################################################################
@@ -65,7 +61,6 @@ jobs:
 
           if [ "$TYPE" != "array" ]; then
             echo "### ℹ️ Dockle did not produce issue list" >> reports/dockle.md
-            echo "" >> reports/dockle.md
             echo "Raw Output:" >> reports/dockle.md
             echo '```json' >> reports/dockle.md
             cat reports/dockle.json >> reports/dockle.md
@@ -101,4 +96,10 @@ jobs:
           echo "| Code | Message | File |" >> reports/dockle.md
           echo "|------|---------|------|" >> reports/dockle.md
           jq -r '.[] | select(.level=="INFO") | "| \(.code) | \(.title) | \(.target) |"' reports/dockle.json >> reports/dockle.md
-#gyftvh
+
+      # ⬇️ THIS WAS MISSING ⬇️
+      - name: Upload Dockle Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-report  # Must match what the summary bot expects
+          path: reports/dockle.md

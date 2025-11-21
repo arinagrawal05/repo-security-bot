@@ -14,37 +14,49 @@ jobs:
       - name: Build Docker Image
         run: docker build -t my-app:test .
 
-      # 2. RUN the App
+      # 2. RUN the App (With Error Trap)
       - name: Start Container
         run: |
-          docker run -d -p 3000:3000 --name test-container my-app:test
+          # ⚠️ IMPORTANT: Mapping Host 3000 -> Container 8080
+          # (Matches the 'python3 -m http.server 8080' Dockerfile we made)
+          docker run -d -p 3000:8080 --name test-container my-app:test
           
           echo "Waiting for app to start on localhost:3000..."
-          for i in {1..30}; do
+          connected=false
+          
+          # Wait up to 60 seconds
+          for i in {1..60}; do
             if curl -s http://localhost:3000 > /dev/null; then
               echo "✅ App is up!"
+              connected=true
               break
             fi
+            echo "Waiting... ($i/60)"
             sleep 1
           done
+          
+          # 🚨 TRAP: If loop finished and still no connection, FAIL the build.
+          if [ "$connected" = false ]; then
+             echo "❌ APP FAILED TO START. Checking logs..."
+             docker logs test-container
+             exit 1
+          fi
 
-      # ⚠️ NEW STEP: Create the directory BEFORE the scan
+      # 3. Create Directory
       - name: Create reports directory
         run: mkdir -p reports
 
-      # 3. ATTACK with Nuclei
+      # 4. ATTACK with Nuclei
       - name: Run Nuclei DAST Scan
         uses: projectdiscovery/nuclei-action@main
         with:
           target: "http://localhost:3000"
-          # Now this will work because 'reports/' exists
           flags: "-tags cve,misconfig,exposure,token -jsonl -o reports/nuclei.json"
 
-      # 4. Parse Report
+      # 5. Parse Report
       - name: Generate Report
         if: always()
         run: |
-          # No need to mkdir here anymore, but safe to keep
           echo "## ☢️ Nuclei DAST Report" > reports/nuclei.md
           
           if [ ! -s reports/nuclei.json ]; then
@@ -64,3 +76,15 @@ jobs:
                 jq -r '.[] | "| **\(.info.severity)** | \(.info.name) | \(.matched_at) |"' reports/clean.json | head -n 10 >> reports/nuclei.md
              fi
           fi
+
+      # ⬇️ THIS WAS MISSING ⬇️
+      - name: Upload Nuclei Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-report
+          path: reports/nuclei.md
+
+      - name: Stop Container
+        if: always()
+        run: docker stop test-container || true
