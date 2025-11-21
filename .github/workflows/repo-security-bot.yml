@@ -8,6 +8,12 @@ on:
   schedule:
     - cron: "0 12 * * *"
   workflow_dispatch:
+permissions:
+  contents: read      # Allows the bot to clone code
+  issues: write       # Allows the bot to Create/Edit Issues (CRITICAL)
+  checks: write       # Allows uploading check results
+  pull-requests: write # Optional: if you ever want it to comment on PRs
+  actions: read
 
 jobs:
 
