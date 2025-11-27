@@ -17,6 +17,8 @@ jobs:
         run: |
           mkdir -p reports
           docker pull ghcr.io/gitleaks/gitleaks:latest || true
+          
+          # Run Gitleaks and output JSON
           docker run --rm -v "${{ github.workspace }}":/repo \
             ghcr.io/gitleaks/gitleaks:latest detect \
             --source /repo \
@@ -24,12 +26,43 @@ jobs:
             --report-format json \
             --exit-code 0 || true
 
+          # Ensure file exists even if empty
           if [ ! -s reports/gitleaks.json ]; then
             echo '[]' > reports/gitleaks.json
           fi
 
+      # 📝 NEW STEP: Convert JSON to Markdown
+      - name: Generate Pretty Markdown Report
+        run: |
+          echo "## 🔑 Gitleaks Secret Scan Report" > reports/gitleaks.md
+          echo "" >> reports/gitleaks.md
+
+          # Check if JSON is empty array or file is empty
+          if [ ! -s reports/gitleaks.json ] || [ "$(cat reports/gitleaks.json)" == "[]" ]; then
+             echo "✅ *No secrets detected.*" >> reports/gitleaks.md
+             exit 0
+          fi
+
+          # Extract Total Count
+          COUNT=$(jq 'length' reports/gitleaks.json)
+
+          echo "### ⚠ Found *$COUNT* Potential Secrets" >> reports/gitleaks.md
+          echo "" >> reports/gitleaks.md
+          
+          # Generate Table Header
+          echo "| Rule ID | File | Line | Author |" >> reports/gitleaks.md
+          echo "| :--- | :--- | :--- | :--- |" >> reports/gitleaks.md
+          
+          # Parse JSON to Table Rows
+          # We deliberately DO NOT include the 'Secret' column to prevent leaking credentials in the report artifact
+          jq -r '.[] | "| *\(.RuleID)* | \(.File) | \(.StartLine) | \(.Author) |"' reports/gitleaks.json >> reports/gitleaks.md
+
+          echo "" >> reports/gitleaks.md
+          echo "> *Note:* Please rotate any secrets found immediately." >> reports/gitleaks.md
+
+      # 📤 UPDATED: Upload ONLY the Markdown file
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: reports/gitleaks.json
+          path: reports/gitleaks.md

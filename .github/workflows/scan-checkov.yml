@@ -1,31 +1,203 @@
-#Checkov: Sast scanning tool. Checkov scans Iac for security and compliance misconfigurations before deployment.
 name: "Scan: Checkov"
-
 on:
   workflow_call:
-
 jobs:
   checkov:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0  # Fetch all history for all branches
+      
       - name: Install Checkov
         run: pip install --upgrade pip checkov
-
-      - name: Run Checkov
+      
+      - name: Debug - Show Workspace Contents
+        run: |
+          echo "=== Current Directory ==="
+          pwd
+          echo ""
+          echo "=== All Files (tree view) ==="
+          find . -type f -not -path '*/\.git/*' | head -50
+          echo ""
+          echo "=== Terraform Files ==="
+          find . -name "*.tf" -type f -exec echo "Found: {}" \; -exec cat {} \;
+          echo ""
+          echo "=== Checkov Version ==="
+          checkov --version
+          echo ""
+          echo "=== Test Checkov directly on file if it exists ==="
+          if [ -f "main.tf" ]; then
+            echo "main.tf exists, testing direct scan:"
+            checkov -f main.tf --compact || echo "Direct scan failed"
+          else
+            echo "main.tf NOT FOUND in $(pwd)"
+          fi
+      
+      - name: Run Checkov and Produce Clean JSON
         continue-on-error: true
         run: |
           mkdir -p reports
-          checkov -d . --quiet -o json > reports/checkov_results.json || true
-
-          if [ ! -s reports/checkov_results.json ]; then
+          
+          # Count terraform files
+          TF_COUNT=$(find . -name "*.tf" -type f -not -path '*/\.git/*' | wc -l)
+          echo "Found $TF_COUNT .tf files"
+          
+          if [ "$TF_COUNT" -eq 0 ]; then
+            echo "ERROR: No Terraform files found in workspace!"
+            echo "[]" > reports/checkov_results.json
+          else
+            echo "Running Checkov scan on root directory..."
+            
+            # Run Checkov and save output to file directly
+            checkov --directory . --framework terraform --output json \
+              --output-file-path reports 2>&1 | tee reports/checkov_output.log || true
+            
+            echo ""
+            echo "=== All files in current directory ==="
+            find . -name "*.json" -type f
+            echo ""
+            echo "=== Files in reports/ ==="
+            ls -lah reports/
+            echo ""
+            
+            # Check multiple possible locations for the JSON file
+            if [ -f "reports/results_json.json" ]; then
+              echo "✓ Found reports/results_json.json"
+              cp reports/results_json.json reports/checkov_results.json
+            elif [ -f "results_json.json" ]; then
+              echo "✓ Found results_json.json in root"
+              cp results_json.json reports/checkov_results.json
+            elif [ -f "reports/results_json_terraform.json" ]; then
+              echo "✓ Found reports/results_json_terraform.json"
+              cp reports/results_json_terraform.json reports/checkov_results.json
+            else
+              echo "✗ No results JSON file found, creating from direct scan..."
+              
+              # Try direct scan to single file
+              checkov --file main.tf --framework terraform --output json 2>&1 > reports/direct_scan.json || true
+              
+              if [ -s "reports/direct_scan.json" ] && jq empty reports/direct_scan.json 2>/dev/null; then
+                echo "✓ Direct scan produced valid JSON"
+                cp reports/direct_scan.json reports/checkov_results.json
+              else
+                echo "✗ Direct scan failed, using empty array"
+                echo "[]" > reports/checkov_results.json
+              fi
+            fi
+          fi
+          
+          # Validate and show what we have
+          echo ""
+          echo "=== Final checkov_results.json ==="
+          if [ -f "reports/checkov_results.json" ]; then
+            FILE_SIZE=$(wc -c < reports/checkov_results.json)
+            echo "File size: $FILE_SIZE bytes"
+            
+            if [ "$FILE_SIZE" -gt 0 ]; then
+              echo "First 1000 characters:"
+              head -c 1000 reports/checkov_results.json
+              echo ""
+              echo "..."
+              echo ""
+              
+              # Try to validate and get type
+              if jq empty reports/checkov_results.json 2>/dev/null; then
+                JSON_TYPE=$(jq -r 'type' reports/checkov_results.json)
+                echo "✓ Valid JSON (type: $JSON_TYPE)"
+                
+                # Normalize to array if needed
+                if [ "$JSON_TYPE" = "object" ]; then
+                  echo "Wrapping object in array..."
+                  jq '[.]' reports/checkov_results.json > reports/checkov_results_normalized.json
+                  mv reports/checkov_results_normalized.json reports/checkov_results.json
+                fi
+              else
+                echo "✗ Invalid JSON detected"
+                jq empty reports/checkov_results.json 2>&1 | head -5
+                echo "Using empty array as fallback"
+                echo "[]" > reports/checkov_results.json
+              fi
+            else
+              echo "✗ File is empty"
+              echo "[]" > reports/checkov_results.json
+            fi
+          else
+            echo "✗ File doesn't exist"
             echo "[]" > reports/checkov_results.json
           fi
-
+      
+      - name: Generate Pretty Markdown Report
+        run: |
+          echo "## 🏗 Checkov IaC Security Report" > reports/checkov.md
+          echo "" >> reports/checkov.md
+          
+          # First, validate the JSON file exists and is readable
+          if [ ! -f "reports/checkov_results.json" ]; then
+            echo "ERROR: checkov_results.json not found!"
+            echo "❌ *Report generation failed: results file not found*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Check if file is empty
+          if [ ! -s "reports/checkov_results.json" ]; then
+            echo "ERROR: checkov_results.json is empty!"
+            echo "❌ *Report generation failed: results file is empty*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Validate JSON
+          if ! jq empty reports/checkov_results.json 2>/dev/null; then
+            echo "ERROR: Invalid JSON in checkov_results.json"
+            echo "❌ *Report generation failed: invalid JSON format*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Check if array is empty - FIXED: use length without -e flag
+          RESULT_COUNT=$(jq 'if type=="array" then length else 1 end' reports/checkov_results.json 2>/dev/null || echo "0")
+          echo "Result count: $RESULT_COUNT"
+          
+          if [ "$RESULT_COUNT" -eq 0 ]; then
+            echo "✅ *No misconfigurations found.*" >> reports/checkov.md
+            exit 0
+          fi
+          
+          # Loop through each scan block
+          jq -c '.[]' reports/checkov_results.json 2>/dev/null | while IFS= read -r item; do
+            TYPE=$(echo "$item" | jq -r '.check_type // "unknown"')
+            FAILED=$(echo "$item" | jq -r '.summary.failed // 0')
+            PASSED=$(echo "$item" | jq -r '.summary.passed // 0')
+            SKIPPED=$(echo "$item" | jq -r '.summary.skipped // 0')
+            
+            echo "### 🛠 $TYPE Scan" >> reports/checkov.md
+            echo "- 🔴 **FAILED:** $FAILED" >> reports/checkov.md
+            echo "- 🟢 **PASSED:** $PASSED" >> reports/checkov.md
+            echo "- ⚪ **SKIPPED:** $SKIPPED" >> reports/checkov.md
+            echo "" >> reports/checkov.md
+            
+            if [ "$FAILED" -gt 0 ]; then
+              echo "#### ⚠ Issues Found" >> reports/checkov.md
+              echo "" >> reports/checkov.md
+              
+              # Parse failed checks
+              echo "$item" | jq -r '
+                .results.failed_checks[]? |
+                "- 🔴 **\(.check_id): \(.check_name)**  \n  **Resource:** `\(.resource)`  \n  **File:** `\(.file_path // .file_abs_path | sub(".*/"; "")):\(.file_line_range[0])`  \n  **Guideline:** \(if .guideline then (.guideline | sub("^_+"; "") | sub("_+$"; "")) else "N/A" end)  \n"
+              ' >> reports/checkov.md 2>/dev/null || echo "  - Error parsing failed checks" >> reports/checkov.md
+              
+              echo "" >> reports/checkov.md
+            fi
+            
+            echo "---" >> reports/checkov.md
+            echo "" >> reports/checkov.md
+          done
+          
+          echo ""
+          echo "=== Generated Markdown Report ==="
+          cat reports/checkov.md
+      
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: checkov-report
-          path: reports/checkov_results.json
+          path: reports/

@@ -1,0 +1,94 @@
+name: "Scan: Nuclei (Localhost)"
+
+on:
+  workflow_call:
+
+jobs:
+  dast-local:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. BUILD the App
+      - name: Build Docker Image
+        run: docker build -t my-app:test .
+
+      # 2. RUN the App (With Error Trap)
+      - name: Start Container
+        run: |
+          # ⚠️ IMPORTANT: Mapping Host 3000 -> Container 8080
+          # (Matches the 'python3 -m http.server 8080' Dockerfile we made)
+          docker run -d -p 3000:8080 --name test-container my-app:test
+          
+          echo "Waiting for app to start on localhost:3000..."
+          connected=false
+          
+          # Wait up to 60 seconds
+          for i in {1..60}; do
+            if curl -s http://localhost:3000 > /dev/null; then
+              echo "✅ App is up!"
+              connected=true
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 1
+          done
+          
+          # 🚨 TRAP: If loop finished and still no connection, FAIL the build.
+          if [ "$connected" = false ]; then
+             echo "❌ APP FAILED TO START. Checking logs..."
+             docker logs test-container
+             exit 1
+          fi
+
+      # 3. Create Directory
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      # 4. ATTACK with Nuclei
+      - name: Run Nuclei DAST Scan
+        uses: projectdiscovery/nuclei-action@main
+        with:
+          target: "http://localhost:3000"
+          flags: "-tags cve,misconfig,exposure,token -jsonl -o reports/nuclei.json"
+
+      # 5. Parse Report
+      # 5. Parse Report
+      # 5. Parse Report
+      - name: Generate Report
+        if: always()
+        run: |
+          echo "## ☢️ Nuclei DAST Report" > reports/nuclei.md
+          
+          if [ ! -s reports/nuclei.json ]; then
+             echo "✅ **No vulnerabilities found (or scan failed to connect).**" >> reports/nuclei.md
+          else
+             jq -s '.' reports/nuclei.json > reports/clean.json
+             COUNT=$(jq 'length' reports/clean.json)
+             
+             if [ "$COUNT" == "0" ]; then
+                echo "✅ **No vulnerabilities found.**" >> reports/nuclei.md
+             else
+                echo "Found **$COUNT** issues on Local Build." >> reports/nuclei.md
+                echo "" >> reports/nuclei.md
+                echo "### 🔍 Top Findings" >> reports/nuclei.md
+                echo "| Severity | Name |" >> reports/nuclei.md
+                echo "| :--- | :--- |" >> reports/nuclei.md
+                
+                # ⬇️ FIX IS HERE: Added output redirection (>>) ⬇️
+                jq -r '.[] | "| **\(.info.severity)** | \(.info.name) |"' reports/clean.json >> reports/nuclei.md
+             fi
+          fi
+
+      # ⬇️ THIS WAS MISSING ⬇️
+      - name: Upload Nuclei Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-report
+          path: reports/nuclei.md
+
+      - name: Stop Container
+        if: always()
+        run: docker stop test-container || true

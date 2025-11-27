@@ -8,34 +8,104 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Run Dockle
+      - name: Detect Dockerfile
+        id: detect
+        run: |
+          if [ -f "Dockerfile" ]; then
+            echo "dockerfile=Dockerfile" >> $GITHUB_OUTPUT
+          elif [ -f "Dockerfile.txt" ]; then
+            echo "dockerfile=Dockerfile.txt" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image
+        if: steps.detect.outputs.dockerfile != ''
+        run: |
+          docker build -t security-image:latest -f "${{ steps.detect.outputs.dockerfile }}" . || true
+
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: Pull Dockle
+        run: docker pull goodwithtech/dockle:latest || true
+
+      - name: Run Dockle scan
         continue-on-error: true
         run: |
-          mkdir -p reports
-
-          if [ -f "Dockerfile" ] || [ -f "Dockerfile.txt" ]; then
-            DOCKERFILE=$( [ -f Dockerfile ] && echo Dockerfile || echo Dockerfile.txt )
-            docker build -t security-image:latest -f "${DOCKERFILE}" . || true
-
-            docker pull goodwithtech/dockle:latest || true
-
+          if [ "${{ steps.detect.outputs.dockerfile }}" = "" ]; then
+            echo '{"message":"No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
+          else
+            # JSON output
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "${{ github.workspace }}/reports":/reports \
               goodwithtech/dockle:latest \
+              --exit-code 0 \
               -f json -o /reports/dockle.json security-image:latest || true
-          else
-            echo '{"message":"No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
           fi
 
-          if [ ! -s reports/dockle.json ]; then
-            echo '{"message":"Dockle produced no output."}' > reports/dockle.json
+      ####################################################################
+      # 💎 BEAUTIFUL REPORT GENERATION (PRETTIFIED)
+      ####################################################################
+      - name: Generate Pretty Markdown Report
+        run: |
+          echo "## 🛡️ Dockle Security Summary" > reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          # 1. Check if 'details' array exists
+          DETAILS_TYPE=$(jq -r '.details | type' reports/dockle.json)
+
+          if [ "$DETAILS_TYPE" != "array" ]; then
+            echo "### ℹ️ Dockle did not produce issue list" >> reports/dockle.md
+            echo "Raw Output:" >> reports/dockle.md
+            echo '```json' >> reports/dockle.md
+            cat reports/dockle.json >> reports/dockle.md
+            echo '```' >> reports/dockle.md
+            exit 0
           fi
 
-      - name: Upload artifact
+          # 2. Extract counts directly from the summary block
+          FATAL=$(jq '.summary.fatal' reports/dockle.json)
+          WARN=$(jq '.summary.warn' reports/dockle.json)
+          INFO=$(jq '.summary.info' reports/dockle.json)
+          PASS=$(jq '.summary.pass' reports/dockle.json)
+
+          echo "### 🔍 Summary" >> reports/dockle.md
+          echo "- 🔴 **FATAL:** $FATAL" >> reports/dockle.md
+          echo "- 🟡 **WARN:** $WARN" >> reports/dockle.md
+          echo "- 🟢 **INFO:** $INFO" >> reports/dockle.md
+          echo "- ✅ **PASS:** $PASS" >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          #############################
+          # 3. Loop through .details[] instead of root .[]
+          #############################
+          
+          echo "### 🔴 FATAL Issues" >> reports/dockle.md
+          echo "| Code | Message |" >> reports/dockle.md
+          echo "|------|---------|" >> reports/dockle.md
+          # Note: .alerts is an array, we join them for cleaner display
+          jq -r '.details[] | select(.level=="FATAL") | "| \(.code) | \(.title) |"' reports/dockle.json >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          echo "### 🟡 WARN Issues" >> reports/dockle.md
+          echo "| Code | Message |" >> reports/dockle.md
+          echo "|------|---------|" >> reports/dockle.md
+          jq -r '.details[] | select(.level=="WARN") | "| \(.code) | \(.title) |"' reports/dockle.json >> reports/dockle.md
+          echo "" >> reports/dockle.md
+
+          echo "### 🟢 INFO Issues" >> reports/dockle.md
+          echo "| Code | Message |" >> reports/dockle.md
+          echo "|------|---------|" >> reports/dockle.md
+          jq -r '.details[] | select(.level=="INFO") | "| \(.code) | \(.title) |"' reports/dockle.json >> reports/dockle.md
+
+      # ⬇️ THIS WAS MISSING ⬇️
+      - name: Upload Dockle Report
         uses: actions/upload-artifact@v4
         with:
-          name: dockle-report
-          path: reports/dockle.json
+          name: dockle-report  # Must match what the summary bot expects
+          path: reports/dockle.md

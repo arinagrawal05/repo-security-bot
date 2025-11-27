@@ -1,45 +1,38 @@
-# 1. Using an older tag (but one that can still be built)
-# Dockle will still flag this!
-FROM ubuntu:22.04
+# ❌ BAD: Using 'latest' tag (Unpredictable builds)
+# [DKL-DI-0001] Avoid latest tag
+FROM ubuntu:latest
 
-# 2. Storing secrets in LABEL (CIS-DI-0004)
-LABEL maintainer="admin@example.com" \
-      password="mypassword123"
+# ❌ BAD: No MAINTAINER or Labels (CIS Recommendation)
+# [CIS-DI-0005] Enable Content Trust (checked via labels sometimes)
 
-# 3. Storing secrets in ENV (CIS-DI-0003)
-ENV API_KEY="sk_live_12345abcdeFGHIjklmNOPqrst"
-ENV DATABASE_PASSWORD="super_secret_db_pass!"
+# ❌ BAD: Installing sudo is a huge red flag
+# [DKL-DI-0006] Avoid sudo command
+RUN apt-get update && \
+    apt-get install -y sudo vim curl python3
 
-# 4. FIX: Replaced the failing ADD command with a RUN command that simulates it
-# The original 'ADD http://...' line caused a 404 build failure.
-# This line achieves a similar result (creating the file) so the build can continue.
-# Dockle will no longer see the 'ADD URL' flaw, but it will see everything else.
-RUN echo "config_file_content" > /etc/config.conf
+# ❌ BAD: Leaving the apt cache (Bloats image, hides attack surface)
+# [DKL-DI-0005] Clear apt-get caches
+# (Notice I deleted the 'rm -rf /var/lib/apt/lists/*' line)
 
-# 5. Using 'ADD' instead of 'COPY' for local files (CIS-DI-0010)
+# ❌ BAD: Using ADD instead of COPY (ADD can fetch remote URLs/zip bombs)
+# [DKL-DI-0004] Use COPY instead of ADD
 ADD . /app
 
-# 6. Updating/installing in separate layers, not cleaning cache
-#    (CIS-DI-0007: Consolidate 'RUN' instructions)
-#    (DKL-DI-0003: Clear package manager cache)
-RUN apt-get update
-RUN apt-get install -y sudo ssh vim curl
-RUN apt-get upgrade -y # (DKL-DI-0002: Do not use 'upgrade')
+WORKDIR /app
 
-# 7. Installing 'sudo' (DKL-DI-0001)
-# 8. Installing 'ssh' and exposing port 22 (CIS-DI-0008)
-EXPOSE 22
-EXPOSE 80
+# ❌ BAD: Hardcoded "Secret" (Dockle looks for common secret filenames)
+# [DKL-DI-0002] Avoid sensitive directory or file
+ENV AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+ENV AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 
-# 9. Creating a private key inside the image (DKL-DI-0008)
-RUN mkdir -p /root/.ssh/
-# FIX: Corrected typo from 'id_rsv' to 'id_rsa'
-RUN echo "-----BEGIN RSA PRIVATE KEY-----\n...key_data...\n-----END RSA PRIVATE KEY-----" > /root/.ssh/id_rsa
-RUN chmod 600 /root/.ssh/id_rsa
+# ❌ BAD: Running as Root (The User instruction is missing!)
+# [CIS-DI-0001] Create a user for the container
+# [DKL-DI-0001] Avoid running as root
 
-# 10. No HEALTHCHECK instruction (CIS-DI-0009)
-# ... (No HEALTHCHECK provided) ...
+# ❌ BAD: Missing Healthcheck
+# [CIS-DI-0006] Add HEALTHCHECK instruction to the container image
 
-# 11. Running as the default 'root' user (CIS-DI-0001)
-# 12. Setting a default command that runs as root
-CMD ["/usr/sbin/sshd", "-D"]
+# ❌ BAD: Privileged Port 80 (Requires root)
+EXPOSE 8080
+
+CMD ["python3", "-m", "http.server", "8080"]
