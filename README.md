@@ -118,5 +118,5 @@ Check its **Actions tab** and **Issues tab** to see how Repo Security Bot behave
 
 If this bot helps secure your projects, please **star the repo**.
 It motivates further improvements & helps others discover it.
-
+Thankyou!
 ⭐ [https://github.com/arinagrawal05/repo-security-bot](https://github.com/arinagrawal05/repo-security-bot)
